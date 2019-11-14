@@ -1,5 +1,5 @@
 // Copyright 2019 Vedran Vuk. All rights reserved.
-// Use of this source code is governed by a BSD-style
+// Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
 // Package flatfile implements a flat file disk storage. It is a simple,
@@ -45,19 +45,10 @@ import (
 	"sync"
 )
 
-// TODO Implement cell crc.
-
-// TODO Implement pre-write cell backup.
-
-// TODO Implement Circular backup.
-
-// TODO Implement R/W queue and management.
-
 const (
 	HeaderExt  = "header"
 	StreamExt  = "stream"
 	OptionsExt = "options"
-	DeletedExt = "deleted"
 )
 
 var (
@@ -85,59 +76,56 @@ type Options struct {
 	// filename holds the options filename once options have been persisted.
 	filename string
 
-	// TODO InMemory specifies if the file should be kept in memory only.
-	// Default value is false.
-	InMemory bool
-
-	// TODO MirrorDir specifies a directory where an up-to-date mirror file
+	// TODO MirrorDir specifies a directory where an up-to-date exact mirror
 	// copy of the current flatfile will be maintained. If unspecified, no copy
-	// is maintained. Default value is empty.
+	// is maintained.
+	// Default value: [none]
 	MirrorDir string
 
-	// TODO CellCrcMethod specifies if and which crc method to use for blob crc
-	// padding. CRC padding is optional but required for recovery and better
-	// data security. Default value is crc32. Available options are: crc32
-	CellCrcMethod string
+	// TODO CRC specifies if a cell CRC should be done.
+	// Available options: crc32.
+	// Default value: md5
+	CRC bool
 
 	// CachedWrites specifies if write operations should be cached as well.
-	// Used only if a cache is defined. Default value is false.
+	// Used only if a cache is defined.
+	// Default value: false
 	CachedWrites bool
 
 	// MaxCacheMemory specifies maximum cell cache memory to use.
-	// If <= 0 it is disabled. Default value is 33554432 (32MB)
+	// If <= 0 it is disabled.
+	// Default value: 33554432 (32MB)
 	MaxCacheMemory int64
 
 	// MaxPageSize defines maximum size of a stream page. If <= 0, page size is
-	// of unlimited size. MaxPageSize can be changed between sessions on an
-	// existing flatfile and allocation of new pages will be limited to current
-	// value. If MaxPageSize is reduced and current page is bigger, a new page
-	// is allocated. If PreallocatePages is true and MaxPageSize <= 0 pages
-	// aren't preallocated.
-	//
-	// Page has to be big enough to hold a blob. If a blob is bigger than
-	// MaxPageSize, Put will fail. Default value is 4GB.
+	// of unlimited size.
+	// Default value: 4294967295 (4GB).
 	MaxPageSize int64
 
 	// PreallocatePages specifies if new pages should be preallocated when
-	// created. This increases page creation time but potentially reduces
-	// fragmentation during writes. Default value is true.
+	// created. This increases page creation time but helps minimize OS disk
+	// fragmentation during writes.
+	// Default value: true
 	PreallocatePages bool
 
 	// PersistentHeader specifies if header file should be immediately appended
-	// to disk or kept in memory until FlatFile is closed. Default is true.
+	// to disk or kept in memory until FlatFile is closed.
+	// Default value: true
 	PersistentHeader bool
 
-	// SyncWrites specifies if disk files should be written synchronously. This
+	// SyncWrites specifies if files should be written synchronously. This
 	// circumvents OS write caching, slows down writes considerably and tortures
 	// the disk drive. This option applies to header and stream.
-	// Default value is false.
+	// Default value: false
 	SyncWrites bool
 
 	// Immutable specifies if the file is immutable. If true, Modify and Delete
-	// will fail. Default is true.
+	// will fail.
+	// Default value: true
 	Immutable bool
 
 	// ZeroPadDeleted specifies if deleted cells should be 0 padded.
+	// Default value: true
 	ZeroPadDeleted bool
 }
 
@@ -150,11 +138,9 @@ func NewOptions() *Options {
 
 // init initializes options to default values.
 func (o *Options) init() {
-	o.InMemory = false
 	o.MaxPageSize = 4294967295 // 4GB
 	o.CachedWrites = false
 	o.MaxCacheMemory = 33554432
-	o.CellCrcMethod = "crc32"
 	o.PreallocatePages = true
 	o.PersistentHeader = true
 	o.SyncWrites = false
@@ -303,7 +289,9 @@ func (ff *FlatFile) Len() int {
 	return len(ff.header.cells) - len(ff.header.deletedCells.cells)
 }
 
-// put is the Put implementation
+// put is the Put implementation.
+// If a put fails mid-write, any data that is partially written will be
+// overwritten on next Put.
 func (ff *FlatFile) put(key, val []byte) error {
 	// Check key validity.
 	if len(key) == 0 {
@@ -364,6 +352,17 @@ func (ff *FlatFile) put(key, val []byte) error {
 		// Select page from a reused cell.
 		page = ff.stream.pages[putcell.PageIndex]
 	}
+	// Generate blob checksum.
+	if ff.options.CRC {
+		// TODO Implement crc32
+	}
+	// Write blob.
+	if _, err := page.file.Seek(int64(putcell.Offset), os.SEEK_SET); err != nil {
+		return fmt.Errorf("stream seek error: %w", err)
+	}
+	if _, err := page.file.Write(val); err != nil {
+		return fmt.Errorf("stream write error: %w", err)
+	}
 	// If SyncHeader is enabled, seek to header end, write length of binary
 	// encoded cell then the cell itself, otherwise mark cell dirty.
 	if ff.options.PersistentHeader {
@@ -380,13 +379,6 @@ func (ff *FlatFile) put(key, val []byte) error {
 		}
 	} else {
 		ff.header.dirtyCells = append(ff.header.dirtyCells, string(key))
-	}
-	// Write blob.
-	if _, err := page.file.Seek(int64(putcell.Offset), os.SEEK_SET); err != nil {
-		return fmt.Errorf("stream seek error: %w", err)
-	}
-	if _, err := page.file.Write(val); err != nil {
-		return fmt.Errorf("stream write error: %w", err)
 	}
 	// Fill the rest with 0s, if requested.
 	if !ff.options.Immutable && ff.options.ZeroPadDeleted && putcell.CellState != StateNormal {
@@ -416,13 +408,8 @@ func (ff *FlatFile) Put(key, val []byte) error {
 	return ff.put(key, val)
 }
 
-// Get gets data from FlatFile with the specified unique id. If an error occurs
-// it is returned.
-func (ff *FlatFile) Get(key []byte) (blob []byte, err error) {
-
-	ff.mutex.RLock()
-	defer ff.mutex.RUnlock()
-
+// get is the Get implementation.
+func (ff *FlatFile) get(key string, walking bool) (blob []byte, err error) {
 	cell, ok := ff.header.cells[string(key)]
 	if !ok {
 		return nil, ErrKeyNotFound
@@ -442,8 +429,12 @@ func (ff *FlatFile) Get(key []byte) (blob []byte, err error) {
 		if _, err = file.Read(blob); err != nil {
 			return nil, fmt.Errorf("stream read error: %w", err)
 		}
+		// TODO Verify crc32
+		if ff.options.CRC {
+
+		}
 	}
-	if ff.options.MaxCacheMemory > 0 {
+	if ff.options.MaxCacheMemory > 0 && !walking {
 		if cell.Cache == nil {
 			cell.key = string(key)
 			cell.Cache = blob
@@ -451,6 +442,16 @@ func (ff *FlatFile) Get(key []byte) (blob []byte, err error) {
 		ff.header.cachedCells.Push(cell, ff.options.MaxCacheMemory)
 	}
 	return
+}
+
+// Get gets data from FlatFile with the specified unique id. If an error occurs
+// it is returned.
+func (ff *FlatFile) Get(key []byte) (blob []byte, err error) {
+
+	ff.mutex.RLock()
+	defer ff.mutex.RUnlock()
+
+	return ff.get(string(key), false)
 }
 
 // Modify modifies an existing blob specified under key by replacing it with
@@ -476,7 +477,7 @@ func (ff *FlatFile) Modify(key, val []byte) (err error) {
 	return ff.put(key, val)
 }
 
-// delete is delete implementation.
+// delete is Delete implementation.
 func (ff *FlatFile) delete(key []byte) error {
 
 	k := string(key)
@@ -510,8 +511,24 @@ func (ff *FlatFile) Delete(key []byte) error {
 
 // Walk walks the FlatFile by calling f with currently enumerated key/value
 // pair as parameters. f should return true to continue enumeration.
-func (ff *FlatFile) Walk(f func(key, val []byte) bool) {
-	// TODO Implement Walk
+func (ff *FlatFile) Walk(f func(key, val []byte) bool) error {
+
+	ff.mutex.Lock()
+	defer ff.mutex.Unlock()
+
+	for k := range ff.header.cells {
+		data, err := ff.get(k, true)
+		if err != nil {
+			if err == ErrKeyNotFound {
+				continue
+			}
+			return err
+		}
+		if !f([]byte(k), data) {
+			break
+		}
+	}
+	return nil
 }
 
 func (ff *FlatFile) Concat() error {

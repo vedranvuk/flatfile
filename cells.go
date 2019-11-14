@@ -1,3 +1,7 @@
+// Copyright 2019 Vedran Vuk. All rights reserved.
+// Use of this source code is governed by a MIT
+// license that can be found in the LICENSE file.
+
 package flatfile
 
 import (
@@ -7,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"time"
 
 	"github.com/vedranvuk/binaryex"
 )
@@ -28,10 +31,6 @@ type cell struct {
 	// key is used when caching cells.
 	key string
 
-	// TODO TimeStamp
-	// Used in Restore tool.
-	TimeStamp time.Time
-
 	// PageIndex is the index of the stream page where a blob
 	// that this cell descibes is written.
 	PageIndex int64
@@ -48,6 +47,9 @@ type cell struct {
 
 	// CellState is current cell state.
 	CellState
+
+	// CRC32 is a crc32 checksum of blob data.
+	CRC32 [4]byte
 
 	// Cache is the complete blob, in-memory.
 	Cache []byte

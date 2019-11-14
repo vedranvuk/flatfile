@@ -1,3 +1,7 @@
+// Copyright 2019 Vedran Vuk. All rights reserved.
+// Use of this source code is governed by a MIT
+// license that can be found in the LICENSE file.
+
 package main
 
 import (
@@ -12,6 +16,7 @@ import (
 
 func run(ff FlatFileInterface) time.Duration {
 	locktestoptions := NewLockTestOptions()
+	locktestoptions.Verbose = false
 	locktestoptions.TestDuration = 10 * time.Second
 	locktestoptions.MinGetDelay = 0
 	locktestoptions.MaxGetDelay = 0
@@ -57,8 +62,6 @@ func RunForReal() (dur time.Duration) {
 	options.SyncWrites = false
 	options.PersistentHeader = true
 	options.MaxPageSize = 1048576 // 1MB
-	options.ZeroPadDeleted = false
-	options.CachedWrites = true
 
 	ff, err := flatfile.Open("testfile", options)
 	if err != nil {

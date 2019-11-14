@@ -1,3 +1,7 @@
+// Copyright 2019 Vedran Vuk. All rights reserved.
+// Use of this source code is governed by a MIT
+// license that can be found in the LICENSE file.
+
 package main
 
 import (
@@ -9,6 +13,7 @@ import (
 )
 
 type LockTestOptions struct {
+	Verbose      bool
 	TestDuration time.Duration
 
 	MinGetDelay time.Duration
@@ -43,6 +48,8 @@ func NewLockTestOptions() *LockTestOptions {
 }
 
 func (o *LockTestOptions) init() {
+
+	o.Verbose = true
 
 	o.TestDuration = 10 * time.Second
 
@@ -430,7 +437,9 @@ Totals:
 
 func (lt *LockTest) Run(ff FlatFileInterface) time.Duration {
 
-	lt.Mute = true
+	if !lt.options.Verbose {
+		lt.Mute = true
+	}
 
 	start := time.Now()
 	stop := make(chan bool)
