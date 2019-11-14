@@ -171,12 +171,13 @@ func (cc *cachedCells) Push(c *cell, maxalloc int64) error {
 
 	for {
 		elem = cc.cells.Front()
-		if elem != nil {
-			delete(cc.keys, elem.Value.(*cell).key)
-			elem.Value.(*cell).key = ""
-			elem.Value.(*cell).Cache = nil
-			cc.cells.Remove(elem)
+		if elem == nil {
+			break
 		}
+		delete(cc.keys, elem.Value.(*cell).key)
+		elem.Value.(*cell).key = ""
+		elem.Value.(*cell).Cache = nil
+		cc.cells.Remove(elem)
 		if cc.size-c.Used <= maxalloc {
 			break
 		}
