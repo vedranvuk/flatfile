@@ -372,7 +372,7 @@ M: %d`, activeR, activeW, activeD, activeM)
 		select {
 
 		case r := <-lt.reqR:
-			if int(totalR) < lt.options.MaxR {
+			if int(totalR) < lt.options.MaxR && len(queueR) < lt.options.QueueSizeR {
 				queueR = append(queueR, &r)
 				lt.Printf("Scheduler: Queued: Get (%s); Q: %v\n", r.Key, queueR)
 			}
@@ -382,7 +382,7 @@ M: %d`, activeR, activeW, activeD, activeM)
 			totalR++
 
 		case r := <-lt.reqW:
-			if int(totalW) < lt.options.MaxW {
+			if int(totalW) < lt.options.MaxW && len(queueW) < lt.options.QueueSizeW {
 				queueW = append(queueW, &r)
 				lt.Printf("Scheduler: Queued: Put (%s); Q: %v\n", r.Key, queueW)
 			}
@@ -392,7 +392,7 @@ M: %d`, activeR, activeW, activeD, activeM)
 			totalW++
 
 		case r := <-lt.reqD:
-			if int(totalD) < lt.options.MaxD {
+			if int(totalD) < lt.options.MaxD && len(queueD) < lt.options.QueueSizeD {
 				queueD = append(queueD, &r)
 				lt.Printf("Scheduler: Queued: Del (%s); Q: %v\n", r.Key, queueD)
 			}
@@ -402,7 +402,7 @@ M: %d`, activeR, activeW, activeD, activeM)
 			totalD++
 
 		case r := <-lt.reqM:
-			if int(totalM) < lt.options.MaxM {
+			if int(totalM) < lt.options.MaxM && len(queueM) < lt.options.QueueSizeM {
 				queueM = append(queueM, &r)
 				lt.Printf("Scheduler: Queued: Mod (%s); Q: %v\n", r.Key, queueM)
 			}

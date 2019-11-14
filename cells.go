@@ -28,9 +28,6 @@ const (
 // It defines a blob in the stream.
 type cell struct {
 
-	// key is used when caching cells.
-	key string
-
 	// PageIndex is the index of the stream page where a blob
 	// that this cell descibes is written.
 	PageIndex int64
@@ -52,7 +49,10 @@ type cell struct {
 	CRC32 uint32
 
 	// Cache is the complete blob, in-memory.
-	Cache []byte
+	cache []byte
+
+	// key is used when caching cells.
+	key string
 }
 
 // MarshalBinary marshals the cell to a bite slice.
@@ -89,7 +89,7 @@ func (c *cell) write(w io.Writer, key string) (err error) {
 	return nil
 }
 
-// deletedCells holds a slice of deleted cells, ordered by BlobBounds.
+// deletedCells holds a sorted slice of deleted cells, ordered by cell.Allocated.
 type deletedCells struct {
 	cells []*cell
 }
@@ -99,13 +99,12 @@ func newDeletedCells() *deletedCells {
 	return &deletedCells{}
 }
 
-// Push sort inserts a deletedCell to self by cell.Size.
-// Returns true on success, false if cell.Key is duplicate and nothing was done.
-func (dc *deletedCells) Push(c *cell) bool {
+// Push inserts a cell to self by sorted by cell.Allocated.
+func (dc *deletedCells) Push(c *cell) {
 
 	if len(dc.cells) == 0 {
 		dc.cells = append(dc.cells, c)
-		return true
+		return
 	}
 
 	i := sort.Search(len(dc.cells), func(i int) bool {
@@ -115,11 +114,11 @@ func (dc *deletedCells) Push(c *cell) bool {
 	dc.cells = append(dc.cells, nil)
 	copy(dc.cells[i+1:], dc.cells[i:])
 	dc.cells[i] = c
-	return true
+	return
 }
 
-// Pop returns a deletedCell whose .Size is sizeAtLeast or an empty deletedCell
-// if none such found.
+// Pop returns a deleted cell whose .Allocated is sizeAtLeast or
+// an empty cell if none such found.
 func (dc *deletedCells) Pop(sizeAtLeast int64) (c *cell) {
 
 	i := sort.Search(len(dc.cells), func(i int) bool {
@@ -139,7 +138,7 @@ func (dc *deletedCells) Pop(sizeAtLeast int64) (c *cell) {
 	return &cell{}
 }
 
-// Len returns length of self.
+// Len returns length of deletedCells.
 func (dc *deletedCells) Len() int { return len(dc.cells) }
 
 // cachedCells holds cached cells in a FIFO queue.
@@ -175,7 +174,7 @@ func (cc *cachedCells) Push(c *cell, maxalloc int64) error {
 		}
 		delete(cc.keys, elem.Value.(*cell).key)
 		elem.Value.(*cell).key = ""
-		elem.Value.(*cell).Cache = nil
+		elem.Value.(*cell).cache = nil
 		cc.cells.Remove(elem)
 		if cc.size-c.Used <= maxalloc {
 			break
@@ -193,6 +192,6 @@ func (cc *cachedCells) Remove(c *cell) {
 		cc.cells.Remove(elem)
 		delete(cc.keys, c.key)
 		c.key = ""
-		c.Cache = nil
+		c.cache = nil
 	}
 }

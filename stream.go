@@ -11,14 +11,15 @@ import (
 
 // page defines an info about a stream page on disk.
 type page struct {
+
 	// filename is the full fillename of the stream page.
 	filename string
 
-	// file is the page underlying file on disk.s
+	// file is the underlying file of page.
 	file *os.File
 }
 
-// stream holds a collection of pages.
+// stream manages a slice of pages.
 type stream struct {
 
 	// filename holds a base filename for a stream page.
@@ -35,8 +36,8 @@ func newStream(filename string) *stream {
 	}
 }
 
-// Open opens stream page files. maxPageID specifies the maximum id
-// of the page to open.
+// Open opens stream page files up to maxPageID which specifies the maximum
+// id of the page to open.
 func (s *stream) Open(maxPageID int64, sync bool) error {
 
 	opt := os.O_RDWR
@@ -55,7 +56,6 @@ func (s *stream) Open(maxPageID int64, sync bool) error {
 		}
 		s.pages = append(s.pages, p)
 	}
-
 	return nil
 }
 
@@ -76,8 +76,8 @@ func (s *stream) newPageFile(filename string, preallocsize int64) (file *os.File
 	return
 }
 
-// NewPage creates a new page and preallocates the underlying file to
-// specified preallocSize if its value is more than 0.
+// newPage creates a new page and preallocates the underlying file to
+// specified preallocSize if > 0.
 func (s *stream) newPage(preallocSize int64) (int, *page, error) {
 
 	fn := fmt.Sprintf("%s.%.4d.%s", s.filename, len(s.pages), StreamExt)
@@ -94,7 +94,7 @@ func (s *stream) newPage(preallocSize int64) (int, *page, error) {
 	return len(s.pages) - 1, p, nil
 }
 
-// CurrentPage returns the current page. If there are no pages in the stream a
+// currentPage returns the current page. If there are no pages in the stream a
 // new page is created and preallocated according to preallocSize.
 func (s *stream) currentPage(preallocSize int64) (
 	index int, p *page, err error) {
@@ -108,7 +108,8 @@ func (s *stream) currentPage(preallocSize int64) (
 }
 
 // GetCellPage returns a page for cell c. If no page exists it is created. If
-// cells offset and size exceeds
+// cell's bounds exceed page sizelimit a new page is created and returned.
+// Returns the updated cell, page or an error if one occured.
 func (s *stream) GetCellPage(c *cell, sizelimit int64, prealloc bool) (*cell, *page, error) {
 
 	// Reused cells have their pages.
@@ -137,11 +138,10 @@ func (s *stream) GetCellPage(c *cell, sizelimit int64, prealloc bool) (*cell, *p
 	}
 	c.PageIndex = int64(idx)
 	return c, page, nil
-
 }
 
-// Len returns pages length.
-func (s *stream) len() int {
+// Len returns page count.
+func (s *stream) Len() int {
 	return len(s.pages)
 }
 

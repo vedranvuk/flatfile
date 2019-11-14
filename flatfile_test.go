@@ -11,6 +11,8 @@ import (
 	"github.com/vedranvuk/strings"
 )
 
+// TestFlatFileBasicRW writes predefined data, gets and checks it
+// then reopens the file, checking data again.
 func TestFlatFileBasicRW(t *testing.T) {
 
 	if err := os.RemoveAll("test"); err != nil {
@@ -40,11 +42,31 @@ func TestFlatFileBasicRW(t *testing.T) {
 			t.Fatal(err)
 		}
 		if string(buf) != v {
-			t.Fatal("missmatch")
+			t.Fatalf("missmatch: want '%s', got '%s'\n", k, string(buf))
 		}
 	}
 
 	if err := ff.Close(); err != nil {
 		t.Fatal(err)
 	}
+
+	ff, err = Open("test", NewOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for k, v := range data {
+		buf, err := ff.Get([]byte(k))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(buf) != v {
+			t.Fatalf("missmatch: want '%s', got '%s'\n", k, string(buf))
+		}
+	}
+
+	if err := ff.Close(); err != nil {
+		t.Fatal(err)
+	}
+
 }

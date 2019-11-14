@@ -22,20 +22,19 @@ type header struct {
 	// file is the underlying header file.
 	file *os.File
 
-	// cells is a slice of header cells.
+	// cells mapa header cells by their keys.
 	cells map[string]*cell
 
 	// lastKey holds the key of last inserted cell.
 	lastKey string
 
-	// dirtyCells holds in memory only cells and have to be persisted on
-	// session end.
+	// dirtyCells holds cells that haven't been written to header.
 	dirtyCells map[string]bool
 
-	// deletedCells holds a slice of deleted cells sorted by cell size.
+	// deletedCells is a slice of deleted cells sorted by cell.Allocated.
 	deletedCells *deletedCells
 
-	// cachedCells holds a ceched cells queue.
+	// cachedCells is a fifo queue of cached cells.
 	cachedCells *cachedCells
 }
 
@@ -99,7 +98,7 @@ func (h *header) LoadCells() (err error) {
 	return
 }
 
-// SaveAndClearDirty saves unsaved cells to header file.
+// SaveAndClearDirty saves dirty cells to header file then clears dirtyCells.
 func (h *header) SaveAndClearDirty() (err error) {
 
 	if _, err := h.file.Seek(0, os.SEEK_END); err != nil {
@@ -159,17 +158,28 @@ func (h *header) AddCell(key string, c *cell) {
 	h.lastKey = key
 }
 
-// Cache caches val of cell c under key imposing cache size limit, returns cell.
+// Cache caches val of cell c under key, imposing cache size limit
+// then returns the updated cell.
 func (h *header) CacheCell(c *cell, key, val []byte, limit int64) *cell {
 	c.key = string(key)
-	c.Cache = val
+	c.cache = val
 	h.cachedCells.Push(c, limit)
 	return c
+}
+
+// UnCacheCell removes a cell from cache.
+func (h *header) UnCacheCell(c *cell) {
+	h.cachedCells.Remove(c)
 }
 
 // Dirty marks a cell under specified key as dirty.
 func (h *header) MarkCellDirty(key string) {
 	h.dirtyCells[key] = true
+}
+
+// MarkCellDeleted marks c as deleted.
+func (h *header) MarkCellDeleted(c *cell) {
+	h.deletedCells.Push(c)
 }
 
 // IsKeyUsed checks if a cell under specified key exists.
@@ -178,17 +188,18 @@ func (h *header) IsKeyUsed(key string) bool {
 	return exists && c.CellState != StateDeleted
 }
 
-// CurrentPageIndex returns index of current page.
-func (h *header) CurrentPageIndex() int64 {
+// LastCellPageIndex returns index of page from last written cell.
+func (h *header) LastCellPageIndex() int64 {
 	if h.lastKey == "" {
 		return 0
 	}
 	return h.cells[h.lastKey].PageIndex
-
 }
 
-// aves dirty cells if they exist and definitely closes the header file.
+// Close saves dirty cells if they exist and definitely closes the header file.
 func (h *header) Close() (err error) {
+
+	//TODO Improve
 
 	defer func() {
 		h.file.Close()

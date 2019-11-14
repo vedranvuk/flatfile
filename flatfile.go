@@ -15,7 +15,7 @@
 //
 // Header is packed, cell entries are of variable length and are loaded once
 // per session and remain in memory until saved and reloaded between sessions.
-// Header persistence can be instant, once on session end, or manually.
+// Header persistence can be instant, once on session end, or manual.
 // Stream is immediately persisted.
 //
 // Stream size can be limited and split across files as pages. In that case Put
@@ -26,13 +26,10 @@
 // Delete simply marks the cell as deleted. Successive Puts will reuse deleted
 // cells if their allocated blob space is as bigger and as close as possible to
 // Put data size. If there are no such cells a new one is created. Once
-// allocated blob space cannot be resized but can be reused.
+// allocated, blob space cannot be resized but can be reused.
 //
 // Both the Header and Stream can be recreated manually to prune modified cells
-// and pack the .header and .stream to smallest possible size.
-//
-// Changing options between sessions is not allowed via Open but can be changed
-// if options are clear text and will not corrupt the file.
+// and pack the .header and .stream to smallest possible size using Compact().
 package flatfile
 
 import (
@@ -60,7 +57,7 @@ var (
 	// exceeds Options.MaxPageSize.
 	ErrBlobTooBig = errors.New("blob too big")
 
-	// ErrKeNotFound is returned when a blob under specified key is not found.
+	// ErrKeyNotFound is returned when a blob under specified key is not found.
 	ErrKeyNotFound = errors.New("key not found")
 
 	// ErrDuplicateKey is returned if a key already exists during Put.
@@ -69,6 +66,7 @@ var (
 	// ErrInvalidKey is returned when an invalid key was specified.
 	ErrInvalidKey = errors.New("invalid key")
 
+	// ErrChecksumFailed is returned if a crc failed after a cell Get.
 	ErrChecksumFailed = errors.New("blob checksum failed")
 )
 
@@ -140,7 +138,7 @@ func Open(filename string, options *Options) (*FlatFile, error) {
 	// Open stream page files.
 	if ff.Len() > 0 {
 		if err = ff.stream.Open(
-			ff.header.CurrentPageIndex()+1, ff.options.SyncWrites); err != nil {
+			ff.header.LastCellPageIndex()+1, ff.options.SyncWrites); err != nil {
 
 			ff.header.Close()
 			return nil, fmt.Errorf("error opening stream: %w", err)
@@ -184,6 +182,7 @@ func (ff *FlatFile) saveOptions() (err error) {
 
 // Close closes the FlatFile.
 func (ff *FlatFile) Close() error {
+	// TODO Improve
 	erro := ff.saveOptions()
 	errh := ff.header.Close()
 	errs := ff.stream.Close()
@@ -301,7 +300,7 @@ func (ff *FlatFile) Put(key, val []byte) error {
 }
 
 // get is the Get implementation.
-func (ff *FlatFile) get(key string, walking bool) (blob []byte, err error) {
+func (ff *FlatFile) get(key []byte, walking bool) (blob []byte, err error) {
 	cell, ok := ff.header.cells[string(key)]
 	if !ok {
 		return nil, ErrKeyNotFound
@@ -309,10 +308,7 @@ func (ff *FlatFile) get(key string, walking bool) (blob []byte, err error) {
 	if cell.CellState == StateDeleted {
 		return nil, ErrKeyNotFound
 	}
-	if cell.Cache != nil {
-		blob = cell.Cache
-		err = nil
-	} else {
+	if len(cell.cache) == 0 {
 		file := ff.stream.pages[cell.PageIndex].file
 		if _, err := file.Seek(cell.Offset, os.SEEK_SET); err != nil {
 			return nil, fmt.Errorf("stream seek error: %w", err)
@@ -327,13 +323,16 @@ func (ff *FlatFile) get(key string, walking bool) (blob []byte, err error) {
 				return nil, ErrChecksumFailed
 			}
 		}
+	} else {
+		blob = cell.cache
+		err = nil
 	}
 	if ff.options.MaxCacheMemory > 0 && !walking {
-		if cell.Cache == nil {
+		if cell.cache == nil {
 			cell.key = string(key)
-			cell.Cache = blob
+			cell.cache = blob
 		}
-		ff.header.cachedCells.Push(cell, ff.options.MaxCacheMemory)
+		cell = ff.header.CacheCell(cell, key, blob, ff.options.MaxCacheMemory)
 	}
 	return
 }
@@ -345,7 +344,7 @@ func (ff *FlatFile) Get(key []byte) (blob []byte, err error) {
 	ff.mutex.RLock()
 	defer ff.mutex.RUnlock()
 
-	return ff.get(string(key), false)
+	return ff.get(key, false)
 }
 
 // Modify modifies an existing blob specified under key by replacing it with
@@ -391,8 +390,8 @@ func (ff *FlatFile) delete(key []byte) error {
 	if cell.CellState == StateDeleted {
 		return nil
 	}
-	ff.header.cachedCells.Remove(cell)
-	ff.header.deletedCells.Push(cell)
+	ff.header.UnCacheCell(cell)
+	ff.header.MarkCellDeleted(cell)
 	cell.CellState = StateDeleted
 	return nil
 }
@@ -427,7 +426,7 @@ func (ff *FlatFile) Walk(f func(key, val []byte) bool) error {
 	defer ff.mutex.Unlock()
 
 	for k := range ff.header.cells {
-		data, err := ff.get(k, true)
+		data, err := ff.get([]byte(k), true)
 		if err != nil {
 			if err == ErrKeyNotFound {
 				continue
@@ -441,50 +440,10 @@ func (ff *FlatFile) Walk(f func(key, val []byte) bool) error {
 	return nil
 }
 
-// Concat concats header and stream into a temp file then rotates them with
-// main files. Writes are locked during Concat.
-// Returns an error if one occurs.
-func (ff *FlatFile) Concat() error {
-	// TODO: Implement concat.
+// Compact compacts header and stream into a temp file then rotates them with
+// main files. Writes are locked during Concat. Returns an error if one occurs.
+func (ff *FlatFile) Compact() error {
+	// TODO: Implement Compact().
 
-	/*
-
-		hfile, err := os.Open(fmt.Sprintf("%s.%s", ff.header.filename, ConcatExt))
-		if err != nil {
-			return fmt.Errorf("concat header create failed: %w", err)
-		}
-		pages
-		ff.mutex.Lock()
-		defer ff.mutex.Unlock()
-
-
-		for i := 0; i < ff.stream.len() {
-
-		}
-
-		for ckey, cval := range ff.header.cells {
-
-			// Read.
-			if locking {
-				ff.mutex.RLock()
-			}
-
-			// EndRead
-			if locking {
-				ff.mutex.RUnlock()
-			}
-
-			// Write.
-			if locking {
-				ff.mutex.Lock()
-			}
-
-			// ENdWrite
-			if locking {
-				ff.mutex.Unlock()
-			}
-
-		}
-	*/
 	return nil
 }
