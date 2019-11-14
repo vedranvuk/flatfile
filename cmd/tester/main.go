@@ -22,18 +22,18 @@ func run(ff FlatFileInterface) time.Duration {
 	locktestoptions.MaxGetDelay = 0
 	locktestoptions.MinPutDelay = 0
 	locktestoptions.MaxPutDelay = 0
-	locktestoptions.MinDelDelay = 1
-	locktestoptions.MaxDelDelay = 1
-	locktestoptions.MinModDelay = 2
-	locktestoptions.MaxModDelay = 2
+	locktestoptions.MinDelDelay = 1000
+	locktestoptions.MaxDelDelay = 1000
+	locktestoptions.MinModDelay = 1000
+	locktestoptions.MaxModDelay = 1000
 	locktestoptions.MaxActiveR = 10
 	locktestoptions.MaxActiveW = 1
-	locktestoptions.MaxActiveD = 1
-	locktestoptions.MaxActiveM = 1
-	locktestoptions.MaxR = 10000
-	locktestoptions.MaxW = 10000
-	locktestoptions.MaxD = 10000
-	locktestoptions.MaxM = 10000
+	locktestoptions.MaxActiveD = 10
+	locktestoptions.MaxActiveM = 10
+	locktestoptions.MaxR = 1000
+	locktestoptions.MaxW = 1000
+	locktestoptions.MaxD = 0
+	locktestoptions.MaxM = 0
 	locktest := NewLockTest(locktestoptions)
 	return locktest.Run(ff)
 }
@@ -62,6 +62,7 @@ func RunForReal() (dur time.Duration) {
 	options.SyncWrites = false
 	options.PersistentHeader = true
 	options.MaxPageSize = 1048576 // 1MB
+	// options.MirrorDir = "/home/vedran/backup"
 
 	ff, err := flatfile.Open("testfile", options)
 	if err != nil {
@@ -82,7 +83,11 @@ func RunForReal() (dur time.Duration) {
 
 func main() {
 	emu := RunEmu()
-	rly := RunForReal()
+	rly := time.Duration(0)
+	rly = RunForReal()
+	for i := 0; i < 5; i++ {
+	}
+
 	log.Println("---------------------------------------------")
 	log.Printf("Emu took %s, Rly took %s\n", emu, rly)
 }

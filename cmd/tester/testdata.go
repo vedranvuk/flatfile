@@ -55,7 +55,7 @@ func (td *TestData) GenKey() string {
 // generates a random value
 func (td *TestData) GenVal() string {
 	for {
-		val := strings.RandomString(true, true, true, 8+rand.Intn(1024))
+		val := strings.RandomString(true, true, true, 8+rand.Intn(512))
 		if _, ok := td.vals[val]; ok {
 			continue
 		}

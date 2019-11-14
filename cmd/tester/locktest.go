@@ -13,8 +13,14 @@ import (
 )
 
 type LockTestOptions struct {
-	Verbose      bool
+
+	// Debug info
+	Verbose bool
+
+	// Test timelimit.
 	TestDuration time.Duration
+
+	// Min and Max random duration between requests.
 
 	MinGetDelay time.Duration
 	MaxGetDelay time.Duration
@@ -25,15 +31,22 @@ type LockTestOptions struct {
 	MinModDelay time.Duration
 	MaxModDelay time.Duration
 
+	// Maximum active operations.
+
 	MaxActiveR int
 	MaxActiveW int
 	MaxActiveD int
 	MaxActiveM int
 
+	// Max queue size. Extra requests are dropped.
+
 	QueueSizeR int
 	QueueSizeW int
 	QueueSizeD int
 	QueueSizeM int
+
+	// Max number of operations.
+	// If < 0, unlimited.
 
 	MaxR int
 	MaxW int
@@ -157,55 +170,43 @@ func (lt *LockTest) dispenser() {
 	go lt.requester(reqTickD, lt.options.MinDelDelay, lt.options.MaxDelDelay)
 	go lt.requester(reqTickM, lt.options.MinModDelay, lt.options.MaxModDelay)
 
-	lastReqTickR := time.Now()
-	lastReqTickW := time.Now()
-	lastReqTickD := time.Now()
-	lastReqTickM := time.Now()
 	testdata := NewTestData(0)
 
 	operationID := 0
 	for {
 		select {
-		case now := <-reqTickR:
-			lt.Printf("Dispenser: Tick, Get after %s", now.Sub(lastReqTickR).String())
-			lastReqTickR = time.Now()
+		case <-reqTickR:
 			key, val := testdata.Peek()
 			if key == "" {
-				lt.Println("No data yet.")
+				// lt.Println("No data yet.")
 				continue
 			}
 			lt.reqR <- Request{operationID, key, val, time.Now()}
-			lt.Println("Dispanser: Request: Get, sent.")
-		case now := <-reqTickW:
-			lt.Printf("Dispenser: Tick, Put after %s", now.Sub(lastReqTickW).String())
-			lastReqTickW = time.Now()
+			// lt.Println("Dispenser: Get.")
+		case <-reqTickW:
 			key := testdata.GenKey()
 			val := testdata.GenVal()
 			testdata.Push(key, val)
 			lt.reqW <- Request{operationID, key, val, time.Now()}
-			lt.Println("Dispanser: Request: Put, sent.")
-		case now := <-reqTickD:
-			lt.Printf("Dispenser: Tick, Del after %s", now.Sub(lastReqTickD).String())
-			lastReqTickD = time.Now()
+			// lt.Println("Dispenser: Put")
+		case <-reqTickD:
 			key, val := testdata.Pop()
 			if key == "" {
-				lt.Println("No data yet.")
+				// lt.Println("No data yet.")
 				continue
 			}
 			lt.reqD <- Request{operationID, key, val, time.Now()}
-			lt.Println("Dispanser: Request: Del, sent.")
-		case now := <-reqTickM:
-			lt.Printf("Dispenser: Tick, Mod after %s", now.Sub(lastReqTickM).String())
-			lastReqTickM = time.Now()
+			// lt.Println("Dispenser: Del.")
+		case <-reqTickM:
 			key, val := testdata.Pop()
 			if key == "" {
-				lt.Println("No data yet.")
+				// lt.Println("No data yet.")
 				continue
 			}
 			val = testdata.GenVal()
 			testdata.Push(key, val)
 			lt.reqM <- Request{operationID, key, val, time.Now()}
-			lt.Println("Dispanser: Request: Mod, sent.")
+			// lt.Println("Dispenser: Mod.")
 		}
 		operationID++
 	}
@@ -229,7 +230,7 @@ func (lt *LockTest) scheduler(ff FlatFileInterface, stop, done chan bool) {
 	doneM := make(RequestChan)
 
 	jobR := func(r *Request, done RequestChan) {
-		lt.Printf("JobR: Key: %s,\n", r.Key)
+		lt.Printf("JobR: '%s',\n", r.Key)
 		data, err := ff.Get([]byte(r.Key))
 		if err != nil {
 			if err == flatfile.ErrKeyNotFound {
@@ -250,7 +251,7 @@ func (lt *LockTest) scheduler(ff FlatFileInterface, stop, done chan bool) {
 	}
 
 	jobW := func(r *Request, done RequestChan) {
-		lt.Printf("JobW: Key: %s\n", r.Key)
+		lt.Printf("JobW: '%s'\n", r.Key)
 		if err := ff.Put([]byte(r.Key), []byte(r.Val)); err != nil {
 			lt.Fatalf("FATAL: jobW: %v\n", err)
 		}
@@ -261,7 +262,7 @@ func (lt *LockTest) scheduler(ff FlatFileInterface, stop, done chan bool) {
 	}
 
 	jobD := func(r *Request, done RequestChan) {
-		lt.Printf("JobD: Key: %s\n", r.Key)
+		lt.Printf("JobD: '%s'\n", r.Key)
 		if err := ff.Delete([]byte(r.Key)); err != nil {
 			if err == flatfile.ErrKeyNotFound {
 				lt.Printf("jobD: Miss: '%s'\n", err)
@@ -276,7 +277,7 @@ func (lt *LockTest) scheduler(ff FlatFileInterface, stop, done chan bool) {
 	}
 
 	jobM := func(r *Request, done RequestChan) {
-		lt.Printf("JobM: Key: %s\n", r.Key)
+		lt.Printf("JobM: '%s'\n", r.Key)
 		if err := ff.Modify([]byte(r.Key), []byte(r.Val)); err != nil {
 			if err == flatfile.ErrKeyNotFound {
 				lt.Printf("jobM: Miss: '%s'\n", err)
@@ -290,10 +291,6 @@ func (lt *LockTest) scheduler(ff FlatFileInterface, stop, done chan bool) {
 		done <- dr
 	}
 
-	dlog := func(typ, op string, r *Request) {
-		lt.Printf("Scheduler: (%6.d) %s: %s '%s' after %s", r.Id, typ, op, r.Key, time.Since(r.Issued))
-	}
-
 	queueR := []*Request{}
 	queueW := []*Request{}
 	queueD := []*Request{}
@@ -302,10 +299,11 @@ func (lt *LockTest) scheduler(ff FlatFileInterface, stop, done chan bool) {
 	start := time.Now()
 	run := true
 	for func(bool) bool {
-		if run && lt.options.MaxR > 0 && int(totalR) >= lt.options.MaxR &&
-			lt.options.MaxW > 0 && int(totalW) >= lt.options.MaxW &&
-			lt.options.MaxD > 0 && int(totalD) >= lt.options.MaxD &&
-			lt.options.MaxM > 0 && int(totalM) >= lt.options.MaxM {
+		if run &&
+			lt.options.MaxR >= 0 && int(totalR) >= lt.options.MaxR &&
+			lt.options.MaxW >= 0 && int(totalW) >= lt.options.MaxW &&
+			lt.options.MaxD >= 0 && int(totalD) >= lt.options.MaxD &&
+			lt.options.MaxM >= 0 && int(totalM) >= lt.options.MaxM {
 			run = false
 			lt.Println("Max operations reached.")
 		}
@@ -320,7 +318,7 @@ M: %d`, activeR, activeW, activeD, activeM)
 			}
 			return false
 		}
-		if len(queueW) > 0 && int(totalW) < lt.options.MaxW {
+		if len(queueW) > 0 {
 			if activeW >= lt.options.MaxActiveW {
 				return true
 			}
@@ -332,7 +330,7 @@ M: %d`, activeR, activeW, activeD, activeM)
 			queueW = queueW[1:]
 			return true
 		}
-		if len(queueD) > 0 && int(totalD) < lt.options.MaxD {
+		if len(queueD) > 0 {
 			if activeD >= lt.options.MaxActiveD {
 				return true
 			}
@@ -344,7 +342,7 @@ M: %d`, activeR, activeW, activeD, activeM)
 			queueD = queueD[1:]
 			return true
 		}
-		if len(queueM) > 0 && int(totalM) < lt.options.MaxM {
+		if len(queueM) > 0 {
 			if activeM >= lt.options.MaxActiveM {
 				return true
 			}
@@ -356,7 +354,7 @@ M: %d`, activeR, activeW, activeD, activeM)
 			queueM = queueM[1:]
 			return true
 		}
-		if len(queueR) > 0 && int(totalR) < lt.options.MaxR {
+		if len(queueR) > 0 {
 			if activeR >= lt.options.MaxActiveR {
 				return true
 			}
@@ -374,38 +372,42 @@ M: %d`, activeR, activeW, activeD, activeM)
 		select {
 
 		case r := <-lt.reqR:
-			dlog("Request", "Get", &r)
-			queueR = append(queueR, &r)
-			lt.Printf("RQ: %+v\n", queueR)
+			if int(totalR) < lt.options.MaxR {
+				queueR = append(queueR, &r)
+				lt.Printf("Scheduler: Queued: Get (%s); Q: %v\n", r.Key, queueR)
+			}
 		case d := <-doneR:
-			dlog("Complete", "Get", &d)
+			lt.Printf("Scheduler: Complete: Get (%s)\n", time.Since(d.Issued))
 			activeR--
 			totalR++
 
 		case r := <-lt.reqW:
-			dlog("Request", "Put", &r)
-			queueW = append(queueW, &r)
-			lt.Printf("RW: %+v\n", queueW)
+			if int(totalW) < lt.options.MaxW {
+				queueW = append(queueW, &r)
+				lt.Printf("Scheduler: Queued: Put (%s); Q: %v\n", r.Key, queueW)
+			}
 		case d := <-doneW:
-			dlog("Complete", "Put", &d)
+			lt.Printf("Scheduler: Complete: Put (%s)\n", time.Since(d.Issued))
 			activeW--
 			totalW++
 
 		case r := <-lt.reqD:
-			dlog("Request", "Del", &r)
-			queueD = append(queueD, &r)
-			lt.Printf("RD: %+v\n", queueD)
+			if int(totalD) < lt.options.MaxD {
+				queueD = append(queueD, &r)
+				lt.Printf("Scheduler: Queued: Del (%s); Q: %v\n", r.Key, queueD)
+			}
 		case d := <-doneD:
-			dlog("Complete", "Del", &d)
+			lt.Printf("Scheduler: Complete: Del (%s)\n", time.Since(d.Issued))
 			activeD--
 			totalD++
 
 		case r := <-lt.reqM:
-			dlog("Request", "Mod", &r)
-			queueM = append(queueM, &r)
-			lt.Printf("RM: %+v\n", queueM)
+			if int(totalM) < lt.options.MaxM {
+				queueM = append(queueM, &r)
+				lt.Printf("Scheduler: Queued: Mod (%s); Q: %v\n", r.Key, queueM)
+			}
 		case d := <-doneM:
-			dlog("Complete", "Mod", &d)
+			lt.Printf("Scheduler: Complete: Mod (%s)\n", time.Since(d.Issued))
 			activeM--
 			totalM++
 

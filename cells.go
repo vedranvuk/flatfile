@@ -49,7 +49,7 @@ type cell struct {
 	CellState
 
 	// CRC32 is a crc32 checksum of blob data.
-	CRC32 [4]byte
+	CRC32 uint32
 
 	// Cache is the complete blob, in-memory.
 	Cache []byte
@@ -168,7 +168,6 @@ func (cc *cachedCells) Push(c *cell, maxalloc int64) error {
 		cc.cells.MoveToBack(elem)
 		return nil
 	}
-
 	for {
 		elem = cc.cells.Front()
 		if elem == nil {
