@@ -26,7 +26,9 @@ func TestFlatFileBasicRW(t *testing.T) {
 		data[key] = val
 	}
 
-	ff, err := Open("test", NewOptions())
+	options := NewOptions()
+	options.PreallocatePages = false
+	ff, err := Open("test", options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,5 +70,4 @@ func TestFlatFileBasicRW(t *testing.T) {
 	if err := ff.Close(); err != nil {
 		t.Fatal(err)
 	}
-
 }

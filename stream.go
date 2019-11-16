@@ -60,12 +60,12 @@ func (s *stream) Open(maxPageID int64, sync bool) error {
 }
 
 // newPageFile allocates a file for a new page and returns it or an error.
-func (s *stream) newPageFile(filename string, preallocsize int64) (file *os.File, err error) {
+func (s *stream) newPageFile(filename string, preallocsize int64, prealloc bool) (file *os.File, err error) {
 	file, err = os.OpenFile(filename, os.O_CREATE|os.O_RDWR, os.ModePerm)
 	if err != nil {
 		return
 	}
-	if preallocsize <= 0 {
+	if !prealloc || preallocsize <= 0 {
 		return
 	}
 	if err = file.Truncate(preallocsize); err != nil {
@@ -78,10 +78,10 @@ func (s *stream) newPageFile(filename string, preallocsize int64) (file *os.File
 
 // newPage creates a new page and preallocates the underlying file to
 // specified preallocSize if > 0.
-func (s *stream) newPage(preallocSize int64) (int, *page, error) {
+func (s *stream) newPage(preallocSize int64, prealloc bool) (int, *page, error) {
 
 	fn := fmt.Sprintf("%s.%.4d.%s", s.filename, len(s.pages), StreamExt)
-	file, err := s.newPageFile(fn, preallocSize)
+	file, err := s.newPageFile(fn, preallocSize, prealloc)
 	if err != nil {
 		return -1, nil, fmt.Errorf("error creating new page: %w", err)
 	}
@@ -96,11 +96,11 @@ func (s *stream) newPage(preallocSize int64) (int, *page, error) {
 
 // currentPage returns the current page. If there are no pages in the stream a
 // new page is created and preallocated according to preallocSize.
-func (s *stream) currentPage(preallocSize int64) (
+func (s *stream) currentPage(preallocSize int64, prealloc bool) (
 	index int, p *page, err error) {
 
 	if len(s.pages) <= 0 {
-		return s.newPage(preallocSize)
+		return s.newPage(preallocSize, prealloc)
 	}
 
 	index = len(s.pages) - 1
@@ -118,18 +118,14 @@ func (s *stream) GetCellPage(c *cell, sizelimit int64, prealloc bool) (*cell, *p
 	}
 
 	// Get current page...
-	idx, page, err := s.currentPage(sizelimit)
+	idx, page, err := s.currentPage(sizelimit, prealloc)
 	if err != nil {
 		return c, nil, err
 	}
 	// ...and advance if required.
 	if sizelimit > 0 {
 		if c.Offset+c.Allocated >= sizelimit {
-			if prealloc {
-				idx, page, err = s.newPage(sizelimit)
-			} else {
-				idx, page, err = s.newPage(0)
-			}
+			idx, page, err = s.newPage(sizelimit, prealloc)
 			if err != nil {
 				return c, nil, err
 			}

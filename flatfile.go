@@ -33,9 +33,11 @@
 package flatfile
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -118,9 +120,9 @@ func Open(filename string, options *Options) (*FlatFile, error) {
 	ff.stream = newStream(filepath.Join(filename, bn))
 	ff.header = newHeader(filepath.Join(filename, bn+"."+HeaderExt))
 	// Set up mirror file.
-	if options.MirrorDir != "" && !options.mirror {
+	if options.MirrorDir != "" && !options.mirrored {
 		mirroroptions := *ff.options
-		mirroroptions.mirror = true
+		mirroroptions.mirrored = true
 		mn := filepath.Join(options.MirrorDir, bn)
 		mf, err := Open(mn, &mirroroptions)
 		if err != nil {
@@ -231,11 +233,12 @@ func (ff *FlatFile) put(key, val []byte) error {
 		putcell.CRC32 = crc32.ChecksumIEEE(val)
 	}
 	// Cache cell if requested.
-	if ff.options.CachedWrites && ff.options.MaxCacheMemory > 0 && !ff.options.mirror {
+	if ff.options.CachedWrites && ff.options.MaxCacheMemory > 0 && !ff.options.mirrored {
 		putcell = ff.header.CacheCell(putcell, key, val, ff.options.MaxCacheMemory)
 	}
 	// Get page.
-	putcell, putpage, err := ff.stream.GetCellPage(putcell, ff.options.MaxPageSize, ff.options.PreallocatePages)
+	putcell, putpage, err := ff.stream.GetCellPage(
+		putcell, ff.options.MaxPageSize, ff.options.PreallocatePages)
 	if err != nil {
 		return fmt.Errorf("page alloc error: %w", err)
 	}
@@ -345,6 +348,29 @@ func (ff *FlatFile) Get(key []byte) (blob []byte, err error) {
 	defer ff.mutex.RUnlock()
 
 	return ff.get(key, false)
+}
+
+// GetR returns a ReadSeeker initialized to blob bounds.
+// Reader is closed when caller returns.
+func (ff *FlatFile) GetR(key []byte) (r io.ReadSeeker, err error) {
+
+	ff.mutex.RLock()
+	defer ff.mutex.RUnlock()
+
+	cell, ok := ff.header.cells[string(key)]
+	if !ok {
+		return nil, ErrKeyNotFound
+	}
+	if cell.CellState == StateDeleted {
+		return nil, ErrKeyNotFound
+	}
+	if len(cell.cache) == 0 {
+		file := ff.stream.pages[cell.PageIndex].file
+		return NewReadSeekLimiter(file, cell.Offset, cell.Allocated)
+	} else {
+		return bytes.NewReader(cell.cache), nil
+	}
+	return
 }
 
 // Modify modifies an existing blob specified under key by replacing it with

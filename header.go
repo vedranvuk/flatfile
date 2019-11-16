@@ -49,6 +49,9 @@ func newHeader(filename string) *header {
 	}
 }
 
+// hdr is the .header signature.
+var hdr = []byte{0xF1, 0x47, 0xF1, 0x13}
+
 // OpenOrCreate opens the header file or creates it if it doesn't exist.
 func (h *header) OpenOrCreate(sync bool) (err error) {
 	opt := os.O_CREATE | os.O_RDWR
@@ -56,13 +59,32 @@ func (h *header) OpenOrCreate(sync bool) (err error) {
 		opt = opt | os.O_SYNC
 	}
 	h.file, err = os.OpenFile(h.filename, opt, os.ModePerm)
+	if err != nil {
+		return
+	}
+	if _, err := h.file.Write(hdr[0:]); err != nil {
+		return err
+	}
+	if _, err := h.file.Seek(0, 0); err != nil {
+		return err
+	}
 	return
 }
 
 // LoadCells loads the cells from the header file.
 func (h *header) LoadCells() (err error) {
 
-	buffer := make([]byte, 42)
+	buf := make([]byte, 4)
+	if _, err := h.file.Read(buf); err != nil {
+		return fmt.Errorf("header read failed: %w", err)
+	}
+	for i, v := range buf {
+		if hdr[i] != v {
+			fmt.Errorf("invalid header")
+		}
+	}
+
+	buffer := make([]byte, 64)
 	cellSize := 0
 	name := ""
 	for err == nil {

@@ -68,7 +68,7 @@ type Options struct {
 	filename string
 
 	// mirror specifies if this FlatFile is a mirror.
-	mirror bool
+	mirrored bool
 }
 
 // NewOptions returns a new *Options instance.
