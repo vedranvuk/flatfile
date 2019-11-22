@@ -7,79 +7,93 @@ import (
 	"os"
 )
 
-// ErrReadSeekLimiter is a base ReadSeekLimiter Error
-var ErrReadSeekLimiter = errors.New("readseeklimiter:")
+// ErrReadSeekCloserLimiter is a base LimitedReadSeekCloser Error
+var ErrReadSeekCloserLimiter = errors.New("readseekcloselimiter:")
 
-// ReadSeekLimiterWrapper wraps a ReadSeekLimiter because pointer receivers.
-type ReadSeekLimiterWrapper struct {
-	rsl *ReadSeekLimiter
+// ReadSeekCloser defines a combined io.ReadSeeker and io.Closer interface.
+type ReadSeekCloser interface {
+	io.ReadSeeker
+	io.Closer
+}
+
+// LimitedReadSeekCloserWrapper wraps a LimitedReadSeekCloser because pointer receivers.
+type LimitedReadSeekCloserWrapper struct {
+	rsl *LimitedReadSeekCloser
 }
 
 // Read calls wrapped ReadSeekLimiter's Read.
-func (rslw ReadSeekLimiterWrapper) Read(b []byte) (n int, err error) {
+func (rslw LimitedReadSeekCloserWrapper) Read(b []byte) (n int, err error) {
 	return rslw.rsl.read(b)
 }
 
 // Seek calls wrapped ReadSeekLimiter's Seek.
-func (rslw ReadSeekLimiterWrapper) Seek(offset int64, whence int) (ret int64, err error) {
+func (rslw LimitedReadSeekCloserWrapper) Seek(offset int64, whence int) (ret int64, err error) {
 	return rslw.rsl.seek(offset, whence)
 }
 
-// ReadSeekLimiter wraps a file and limits it's read and seek span.
-type ReadSeekLimiter struct {
+func (rslw LimitedReadSeekCloserWrapper) Close() error {
+	return rslw.rsl.close()
+}
+
+// LimitedReadSeekCloser wraps a file and limits it's read and seek span.
+type LimitedReadSeekCloser struct {
 	f     *os.File
 	fpos  int64
 	ipos  int64
 	limit int64
 }
 
-// NewReadSeekLimiter returns an io.ReadSeeker which starts from offset of f
+// NewLimitedReadSeekCloser returns an io.ReadSeeker which starts from offset of f
 // and is able to read and seek within +size from that position.
-func NewReadSeekLimiter(f *os.File, offset, size int64) (io.ReadSeeker, error) {
+func NewLimitedReadSeekCloser(f *os.File, offset, size int64) (ReadSeekCloser, error) {
 	if _, err := f.Seek(offset, os.SEEK_SET); err != nil {
 		return nil, err
 	}
-	return ReadSeekLimiterWrapper{&ReadSeekLimiter{f, offset, 0, size}}, nil
+	return LimitedReadSeekCloserWrapper{&LimitedReadSeekCloser{f, offset, 0, size}}, nil
 }
 
 // read is the limited read implementation.
-func (rsl *ReadSeekLimiter) read(b []byte) (n int, err error) {
-	readlen := int64(len(b))
-	readlim := rsl.limit - rsl.ipos
+func (rsk *LimitedReadSeekCloser) read(b []byte) (n int, err error) {
+	readlim := rsk.limit - rsk.ipos
 	if readlim <= 0 {
 		return 0, io.EOF
 	}
-
+	readlen := int64(len(b))
 	if readlen > readlim {
-		n, err = rsl.f.Read(b[:readlim])
+		n, err = rsk.f.Read(b[:readlim])
 		return n, io.EOF
 	} else {
-		n, err = rsl.f.Read(b)
+		n, err = rsk.f.Read(b)
 	}
-	rsl.ipos += int64(n)
+	rsk.ipos += int64(n)
 	return
 }
 
 // seek is the limited seek implementation.
-func (rsl *ReadSeekLimiter) seek(offset int64, whence int) (ret int64, err error) {
+func (rsk *LimitedReadSeekCloser) seek(offset int64, whence int) (ret int64, err error) {
 	switch whence {
 	case os.SEEK_SET:
-		if offset < 0 || offset > rsl.limit {
-			return 0, fmt.Errorf("%w seek out of bounds", ErrReadSeekLimiter)
+		if offset < 0 || offset > rsk.limit {
+			return 0, fmt.Errorf("%w seek out of bounds", ErrReadSeekCloserLimiter)
 		}
-		rsl.ipos = offset
+		rsk.ipos = offset
 	case os.SEEK_CUR:
-		if rsl.ipos+offset < 0 || rsl.ipos+offset > rsl.limit {
-			return 0, fmt.Errorf("%w seek out of bounds", ErrReadSeekLimiter)
+		if rsk.ipos+offset < 0 || rsk.ipos+offset > rsk.limit {
+			return 0, fmt.Errorf("%w seek out of bounds", ErrReadSeekCloserLimiter)
 		}
-		rsl.ipos += offset
+		rsk.ipos += offset
 	case os.SEEK_END:
-		if rsl.limit+offset < 0 || rsl.limit+offset > rsl.limit {
-			return 0, fmt.Errorf("%w seek out of bounds", ErrReadSeekLimiter)
+		if rsk.limit+offset < 0 || rsk.limit+offset > rsk.limit {
+			return 0, fmt.Errorf("%w seek out of bounds", ErrReadSeekCloserLimiter)
 		}
-		rsl.limit += offset
+		rsk.limit += offset
 	default:
-		return 0, fmt.Errorf("%w invalid whence", ErrReadSeekLimiter)
+		return 0, fmt.Errorf("%w invalid whence", ErrReadSeekCloserLimiter)
 	}
-	return rsl.f.Seek(offset, whence)
+	return rsk.f.Seek(offset, whence)
+}
+
+// Close
+func (rsk *LimitedReadSeekCloser) close() error {
+	return rsk.f.Close()
 }

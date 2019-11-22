@@ -51,13 +51,8 @@ const (
 )
 
 var (
-	// ErrImmutableFile is returned when a Modify or Delete method has been
-	// called on a file that is opened as immutable.
-	ErrImmutableFile = errors.New("immutable file")
-
-	// ErrBlobToBig is returned in a Put or Modify operation when data size
-	// exceeds Options.MaxPageSize.
-	ErrBlobTooBig = errors.New("blob too big")
+	// ErrInvalidKey is returned when an invalid key was specified.
+	ErrInvalidKey = errors.New("invalid key")
 
 	// ErrKeyNotFound is returned when a blob under specified key is not found.
 	ErrKeyNotFound = errors.New("key not found")
@@ -65,8 +60,13 @@ var (
 	// ErrDuplicateKey is returned if a key already exists during Put.
 	ErrDuplicateKey = errors.New("duplicate key")
 
-	// ErrInvalidKey is returned when an invalid key was specified.
-	ErrInvalidKey = errors.New("invalid key")
+	// ErrBlobToBig is returned in a Put or Modify operation when data size
+	// exceeds Options.MaxPageSize.
+	ErrBlobTooBig = errors.New("blob too big")
+
+	// ErrImmutableFile is returned when a Modify or Delete method has been
+	// called on a file that is opened as immutable.
+	ErrImmutableFile = errors.New("immutable file")
 
 	// ErrChecksumFailed is returned if a crc failed after a cell Get.
 	ErrChecksumFailed = errors.New("blob checksum failed")
@@ -106,45 +106,18 @@ func Open(filename string, options *Options) (*FlatFile, error) {
 	ff := &FlatFile{
 		mutex:   sync.RWMutex{},
 		options: options,
-		stream:  &stream{},
+		header:  newHeader(fmt.Sprintf("%s.%s", filepath.Join(filename, bn), HeaderExt)),
+		stream:  newStream(filepath.Join(filename, bn)),
 	}
 	if ff.options == nil {
 		ff.options = NewOptions()
 	}
-	// Load options
-	ff.options.filename = filepath.Join(filename, bn+"."+OptionsExt)
+	ff.options.filename = fmt.Sprintf("%s.%s", filepath.Join(filename, bn), OptionsExt)
 	if err := ff.loadOptions(); err != nil {
-		return nil, fmt.Errorf("options load error: %w", err)
+		return nil, err
 	}
-	// Create header and stream.
-	ff.stream = newStream(filepath.Join(filename, bn))
-	ff.header = newHeader(filepath.Join(filename, bn+"."+HeaderExt))
-	// Set up mirror file.
-	if options.MirrorDir != "" && !options.mirrored {
-		mirroroptions := *ff.options
-		mirroroptions.mirrored = true
-		mn := filepath.Join(options.MirrorDir, bn)
-		mf, err := Open(mn, &mirroroptions)
-		if err != nil {
-			return nil, fmt.Errorf("error setting up mirror file: %w", err)
-		}
-		ff.mirror = mf
-	}
-	// Open and load the header.
-	if err = ff.header.OpenOrCreate(ff.options.SyncWrites); err != nil {
-		return nil, fmt.Errorf("error opening header: %w", err)
-	}
-	if err = ff.header.LoadCells(); err != nil {
-		return nil, fmt.Errorf("error loading header: %w", err)
-	}
-	// Open stream page files.
-	if ff.Len() > 0 {
-		if err = ff.stream.Open(
-			ff.header.LastCellPageIndex()+1, ff.options.SyncWrites); err != nil {
-
-			ff.header.Close()
-			return nil, fmt.Errorf("error opening stream: %w", err)
-		}
+	if err := ff.loadFiles(); err != nil {
+		return nil, err
 	}
 	return ff, nil
 }
@@ -182,6 +155,49 @@ func (ff *FlatFile) saveOptions() (err error) {
 	return
 }
 
+// loadFiles
+func (ff *FlatFile) loadFiles() (err error) {
+	// Open and load the header.
+	if err = ff.header.OpenOrCreate(ff.options.SyncWrites); err != nil {
+		return fmt.Errorf("error opening header: %w", err)
+	}
+	maxpage, err := ff.header.LoadCells()
+	if err != nil {
+		return fmt.Errorf("error loading header: %w", err)
+	}
+	// Open stream page files.
+	if ff.Len() > 0 {
+		if err = ff.stream.Open(maxpage+1, ff.options.SyncWrites); err != nil {
+
+			ff.header.Close()
+			return fmt.Errorf("error opening stream: %w", err)
+		}
+	}
+	return
+}
+
+// updateHeader updates header.
+// If SyncHeader is enabled, seek to header end, write length of binary
+// encoded cell then the cell itself, otherwise mark cell dirty.
+func (ff *FlatFile) updateHeader(cell *cell) error {
+	if ff.options.PersistentHeader {
+		if _, err := ff.header.file.Seek(0, os.SEEK_END); err != nil {
+			return fmt.Errorf("header seek error: %w", err)
+		}
+		if err := cell.write(ff.header.file, string(cell.key)); err != nil {
+			return err
+		}
+		if ff.options.SyncWrites {
+			if err := ff.header.file.Sync(); err != nil {
+				return fmt.Errorf("header sync failed: %w", err)
+			}
+		}
+	} else {
+		ff.header.MarkCellDirty(cell)
+	}
+	return nil
+}
+
 // Close closes the FlatFile.
 func (ff *FlatFile) Close() error {
 	// TODO Improve
@@ -193,10 +209,57 @@ func (ff *FlatFile) Close() error {
 		errm = ff.mirror.Close()
 	}
 	if erro != nil || errh != nil || errs != nil || errm != nil {
-		return fmt.Errorf(
-			"error closing flatfile: options: %s, header %s, stream %s, mirror: %s",
+		return fmt.Errorf(`error closing flatfile: 
+	optionserr: %v
+	headererr:  %v
+	streamerr:  %v
+	mirror:     %v`,
 			erro, errh, errs, errm)
 	}
+	return nil
+}
+
+// Reopen closes and reopens header and stream.
+func (ff *FlatFile) Reopen() (err error) {
+	if err = ff.Close(); err != nil {
+		return
+	}
+	if err = ff.loadFiles(); err != nil {
+		return
+	}
+	return
+}
+
+// Walk walks the FlatFile by calling f with currently enumerated key/value
+// pair as parameters. f should return true to continue enumeration.
+func (ff *FlatFile) Walk(f func(key, val []byte) bool) error {
+
+	ff.mutex.Lock()
+	defer ff.mutex.Unlock()
+
+	for k := range ff.header.keys {
+		data, err := ff.get([]byte(k), true)
+		if err != nil {
+			if err == ErrKeyNotFound {
+				continue
+			}
+			return err
+		}
+		if !f([]byte(k), data) {
+			break
+		}
+	}
+	return nil
+}
+
+// Compact compacts header and stream into a temp file then rotates them with
+// main files. Writes are locked during Concat. Returns an error if one occurs.
+func (ff *FlatFile) Compact() error {
+	// TODO: Implement Compact().
+
+	ff.mutex.RLock()
+	defer ff.mutex.RUnlock()
+
 	return nil
 }
 
@@ -206,7 +269,7 @@ func (ff *FlatFile) Len() int {
 	ff.mutex.RLock()
 	defer ff.mutex.RUnlock()
 
-	return len(ff.header.cells) - len(ff.header.deletedCells.cells)
+	return len(ff.header.keys) - len(ff.header.cellBin.cells)
 }
 
 // put is the Put implementation.
@@ -227,14 +290,15 @@ func (ff *FlatFile) put(key, val []byte) error {
 		return ErrBlobTooBig
 	}
 	// Initialize a cell.
-	putcell := ff.header.MakeCell(!ff.options.Immutable, int64(putsize))
+	putcell := ff.header.GetFreeCell(!ff.options.Immutable, int64(putsize))
+	putcell.key = string(key)
 	// Generate blob checksum.
 	if ff.options.CRC {
 		putcell.CRC32 = crc32.ChecksumIEEE(val)
 	}
 	// Cache cell if requested.
 	if ff.options.CachedWrites && ff.options.MaxCacheMemory > 0 && !ff.options.mirrored {
-		putcell = ff.header.CacheCell(putcell, key, val, ff.options.MaxCacheMemory)
+		ff.header.CacheCell(putcell, val, ff.options.MaxCacheMemory)
 	}
 	// Get page.
 	putcell, putpage, err := ff.stream.GetCellPage(
@@ -262,25 +326,12 @@ func (ff *FlatFile) put(key, val []byte) error {
 			return fmt.Errorf("stream sync failed: %w", err)
 		}
 	}
-	// If SyncHeader is enabled, seek to header end, write length of binary
-	// encoded cell then the cell itself, otherwise mark cell dirty.
-	if ff.options.PersistentHeader {
-		if _, err := ff.header.file.Seek(0, os.SEEK_END); err != nil {
-			return fmt.Errorf("header seek error: %w", err)
-		}
-		if err := putcell.write(ff.header.file, string(key)); err != nil {
-			return err
-		}
-		if ff.options.SyncWrites {
-			if err := ff.header.file.Sync(); err != nil {
-				return fmt.Errorf("header sync failed: %w", err)
-			}
-		}
-	} else {
-		ff.header.MarkCellDirty((string(key)))
+	// Update header file.
+	if err := ff.updateHeader(putcell); err != nil {
+		return err
 	}
 	// Append the cell.
-	ff.header.AddCell(string(key), putcell)
+	ff.header.AddCell(putcell)
 	return nil
 }
 
@@ -304,7 +355,8 @@ func (ff *FlatFile) Put(key, val []byte) error {
 
 // get is the Get implementation.
 func (ff *FlatFile) get(key []byte, walking bool) (blob []byte, err error) {
-	cell, ok := ff.header.cells[string(key)]
+
+	cell, ok := ff.header.keys[string(key)]
 	if !ok {
 		return nil, ErrKeyNotFound
 	}
@@ -335,7 +387,7 @@ func (ff *FlatFile) get(key []byte, walking bool) (blob []byte, err error) {
 			cell.key = string(key)
 			cell.cache = blob
 		}
-		cell = ff.header.CacheCell(cell, key, blob, ff.options.MaxCacheMemory)
+		ff.header.CacheCell(cell, blob, ff.options.MaxCacheMemory)
 	}
 	return
 }
@@ -350,14 +402,14 @@ func (ff *FlatFile) Get(key []byte) (blob []byte, err error) {
 	return ff.get(key, false)
 }
 
-// GetR returns a ReadSeeker initialized to blob bounds.
-// Reader is closed when caller returns.
+// GetR returns a LimitedReadSeekCloser bounded to cell blob.
+// Caller should Close() the LimitedReadSeekCloser after use.
 func (ff *FlatFile) GetR(key []byte) (r io.ReadSeeker, err error) {
 
 	ff.mutex.RLock()
 	defer ff.mutex.RUnlock()
 
-	cell, ok := ff.header.cells[string(key)]
+	cell, ok := ff.header.keys[string(key)]
 	if !ok {
 		return nil, ErrKeyNotFound
 	}
@@ -365,12 +417,15 @@ func (ff *FlatFile) GetR(key []byte) (r io.ReadSeeker, err error) {
 		return nil, ErrKeyNotFound
 	}
 	if len(cell.cache) == 0 {
-		file := ff.stream.pages[cell.PageIndex].file
-		return NewReadSeekLimiter(file, cell.Offset, cell.Allocated)
+		fn := ff.stream.pages[cell.PageIndex].filename
+		file, err := os.OpenFile(fn, os.O_RDONLY, os.ModePerm)
+		if err != nil {
+			return nil, err
+		}
+		return NewLimitedReadSeekCloser(file, cell.Offset, cell.Allocated)
 	} else {
 		return bytes.NewReader(cell.cache), nil
 	}
-	return
 }
 
 // Modify modifies an existing blob specified under key by replacing it with
@@ -384,7 +439,7 @@ func (ff *FlatFile) Modify(key, val []byte) (err error) {
 	ff.mutex.Lock()
 	defer ff.mutex.Unlock()
 
-	if _, ok := ff.header.cells[string(key)]; !ok {
+	if _, ok := ff.header.keys[string(key)]; !ok {
 		return ErrKeyNotFound
 	}
 	if ff.options.MaxPageSize > 0 && int64(len(val)) > ff.options.MaxPageSize {
@@ -409,7 +464,7 @@ func (ff *FlatFile) delete(key []byte) error {
 
 	k := string(key)
 
-	cell, ok := ff.header.cells[k]
+	cell, ok := ff.header.keys[k]
 	if !ok {
 		return ErrKeyNotFound
 	}
@@ -417,9 +472,12 @@ func (ff *FlatFile) delete(key []byte) error {
 		return nil
 	}
 	ff.header.UnCacheCell(cell)
-	ff.header.MarkCellDeleted(cell)
+	ff.header.TrashCell(cell)
+	cell.key = ""
+	cell.CRC32 = 0
 	cell.CellState = StateDeleted
-	return nil
+
+	return ff.updateHeader(cell)
 }
 
 // Delete marks a blob specified under key as deleted. If an error occurs it
@@ -441,35 +499,5 @@ func (ff *FlatFile) Delete(key []byte) error {
 			return fmt.Errorf("mirror error: %w", err)
 		}
 	}
-	return nil
-}
-
-// Walk walks the FlatFile by calling f with currently enumerated key/value
-// pair as parameters. f should return true to continue enumeration.
-func (ff *FlatFile) Walk(f func(key, val []byte) bool) error {
-
-	ff.mutex.Lock()
-	defer ff.mutex.Unlock()
-
-	for k := range ff.header.cells {
-		data, err := ff.get([]byte(k), true)
-		if err != nil {
-			if err == ErrKeyNotFound {
-				continue
-			}
-			return err
-		}
-		if !f([]byte(k), data) {
-			break
-		}
-	}
-	return nil
-}
-
-// Compact compacts header and stream into a temp file then rotates them with
-// main files. Writes are locked during Concat. Returns an error if one occurs.
-func (ff *FlatFile) Compact() error {
-	// TODO: Implement Compact().
-
 	return nil
 }

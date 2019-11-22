@@ -1,8 +1,8 @@
 # flatfile	
 
-Package flatfile implements a disk datastore with a key/value interface and a Journal-like behaviour. 
+Package flatfile implements a disk datastore with a key/value interface and a journal-like behaviour. 
 
-The motivation was to build a simple, small, easy to use and relatively fast datastore.
+The motivation was to build a simple, small, easy to use and relatively fast no-delete datastore, but functionality to modify data has been added as well, albeit with drawbacks.
 
 ## Features
 
@@ -19,7 +19,7 @@ Put appends keyed data blobs to Stream and marks the locations in the Header for
 
 Deleted blobs are reused by picking the blob that is closest and at least the size of Put at Put time. Rest of reused blob is empty until next possible reuse which can be more or less space efficient. If no deleted blobs can hold Put, a new blob is created. Blobs are always written in single chunks and don't span across pages. If there is a Page size limit, Put blob must be smaller than a page.
 
-This approach gives fast, direct IO but can cause fragmenting. To battle blob data fragmentation Stream pages can be preallocated. To minimize wasted space which results from zero-padding the unused space of reused cells a manual Concat function can re-create the Header and Stream, at runtime or otherwise.
+This approach gives fast, direct IO but data modification cause fragmentation. To battle blob data fragmentation Stream pages can be preallocated. To minimize wasted space which results from zero-padding the unused space of reused cells a manual Concat function can re-create the Header and Stream, at runtime or otherwise.
 
 For redundancy, FlatFile can simultaneously maintain an up-to-date copy of itself in a separate location.
 
@@ -45,7 +45,8 @@ type FlatFileInterface interface {
 
 ## Cons
 
-* Waste space increases with Delete and Modify operations.
+* Waste space introduced with each Delete and Modify operation.
+* Potentional fragmentation increased with non-preallocated stream.
 
 ## License
 

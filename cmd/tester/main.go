@@ -60,7 +60,6 @@ func RunForReal() (dur time.Duration) {
 	options.SyncWrites = false
 	options.PersistentHeader = true
 	options.MaxPageSize = 1048576 // 1MB
-	// options.MirrorDir = "/home/vedran/backup"
 
 	ff, err := flatfile.Open("testfile", options)
 	if err != nil {
@@ -104,4 +103,5 @@ func main() {
 
 	log.Println("---------------------------------------------")
 	log.Printf("Emu took %s, Rly took %s\n", emu, rly)
+
 }

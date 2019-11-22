@@ -19,7 +19,7 @@ func TestReadSeekLimiter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rsl, err := NewReadSeekLimiter(file, 5, 5)
+	rsl, err := NewLimitedReadSeekCloser(file, 5, 5)
 	if err != nil {
 		t.Fatal(err)
 	}

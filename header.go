@@ -22,31 +22,40 @@ type header struct {
 	// file is the underlying header file.
 	file *os.File
 
-	// cells mapa header cells by their keys.
-	cells map[string]*cell
+	// cells contains all loaded cells.
+	cells *pot
+
+	// keys maps a key to a cell.
+	keys map[string]*cell
 
 	// lastKey holds the key of last inserted cell.
 	lastKey string
 
 	// dirtyCells holds cells that haven't been written to header.
-	dirtyCells map[string]bool
+	dirtyCells map[string]*cell
 
-	// deletedCells is a slice of deleted cells sorted by cell.Allocated.
-	deletedCells *deletedCells
+	// cellBin is a slice of deleted cells sorted by cell.Allocated.
+	cellBin *bin
 
-	// cachedCells is a fifo queue of cached cells.
-	cachedCells *cachedCells
+	// cellCache is a fifo queue of cached cells.
+	cellCache *cache
 }
 
 // newHeader creates a new header with specified filename.
-func newHeader(filename string) *header {
-	return &header{
-		filename:     filename,
-		cells:        make(map[string]*cell),
-		dirtyCells:   make(map[string]bool),
-		deletedCells: newDeletedCells(),
-		cachedCells:  newCachedCells(),
+func newHeader(filename string) (h *header) {
+	h = &header{
+		filename: filename,
 	}
+	return h
+}
+
+// init initializes the header.
+func (h *header) init() {
+	h.cells = newPot()
+	h.keys = make(map[string]*cell)
+	h.dirtyCells = make(map[string]*cell)
+	h.cellBin = newBin()
+	h.cellCache = newCache()
 }
 
 // hdr is the .header signature.
@@ -72,52 +81,82 @@ func (h *header) OpenOrCreate(sync bool) (err error) {
 }
 
 // LoadCells loads the cells from the header file.
-func (h *header) LoadCells() (err error) {
-
+func (h *header) LoadCells() (lastpage int64, err error) {
+	// init.
+	h.init()
+	// read header.
 	buf := make([]byte, 4)
 	if _, err := h.file.Read(buf); err != nil {
-		return fmt.Errorf("header read failed: %w", err)
+		return 0, fmt.Errorf("header read failed: %w", err)
 	}
 	for i, v := range buf {
 		if hdr[i] != v {
-			fmt.Errorf("invalid header")
+			return 0, fmt.Errorf("invalid header")
 		}
 	}
-
-	buffer := make([]byte, 64)
-	cellSize := 0
-	name := ""
+	// temp vars.
+	cbuf := make([]byte, 64)
+	ckey := ""
+	csize := 0
+	// read till EOF.
 	for err == nil {
-
-		// Cell key.
-		if err = binaryex.ReadString(h.file, &name); err != nil {
-			break
-		}
-		// Duplicate cell keys take precedence, old are trimmed as Delete
-		// and Modify allocate new cell structure internally and on-disk
-		// cell is packed and cannot be resized, but replaced.
-		if _, ok := h.cells[name]; ok {
-			delete(h.cells, name)
-		}
-		// Cell size.
 		cell := &cell{}
-		if err = binaryex.ReadNumber(h.file, &cellSize); err != nil {
+		// key.
+		if err = binaryex.ReadString(h.file, &ckey); err != nil {
 			break
 		}
-		// Cell.
-		if _, err = io.ReadFull(h.file, buffer[:cellSize]); err != nil {
+		cell.key = ckey
+		// size.
+		if err = binaryex.ReadNumber(h.file, &csize); err != nil {
 			break
 		}
-		if err = cell.UnmarshalBinary(buffer); err != nil {
+		// cell.
+		if _, err = io.ReadFull(h.file, cbuf[:csize]); err != nil {
 			break
 		}
-		h.cells[name] = cell
-		h.lastKey = name
+		if err = cell.UnmarshalBinary(cbuf); err != nil {
+			break
+		}
+		// put cell to pot.
+		h.cells.Mask(cell)
 	}
-	if errors.Is(err, io.EOF) {
-		return nil
+	// check err
+	if !errors.Is(err, io.EOF) {
+		return 0, err
 	}
-	return
+	err = nil
+	// update deleted cells.
+	maxpage := int64(0)
+	h.cells.Walk(func(c *cell) bool {
+		if c.CellState == StateDeleted {
+			h.cellBin.Trash(c)
+		} else {
+			h.keys[c.key] = c
+			h.lastKey = c.key
+		}
+		if c.PageIndex > maxpage {
+			maxpage = c.PageIndex
+		}
+		return true
+	})
+	/*
+		if err = h.file.Truncate(0); err != nil {
+			return 0, err
+		}
+		if _, err := h.file.Write(hdr[0:]); err != nil {
+			return 0, err
+		}
+	*/
+	return maxpage, err
+}
+
+// lastAddedCell returns the last added cell in the header,
+// or if the header is empty, a new empty cell.
+func (h *header) lastAddedCell() *cell {
+	if h.lastKey == "" {
+		return &cell{}
+	}
+	return h.keys[h.lastKey]
 }
 
 // SaveAndClearDirty saves dirty cells to header file then clears dirtyCells.
@@ -128,32 +167,23 @@ func (h *header) SaveAndClearDirty() (err error) {
 	}
 
 	for key := range h.dirtyCells {
-		cell := h.cells[key]
+		cell := h.keys[key]
 		if err = cell.write(h.file, key); err != nil {
 			return
 		}
 	}
-	h.dirtyCells = make(map[string]bool)
+	h.dirtyCells = nil
+	h.dirtyCells = make(map[string]*cell)
 
 	return nil
 }
 
-// lastAddedCell returns the last added cell in the header,
-// or if the header is empty, a new empty cell.
-func (h *header) lastAddedCell() *cell {
-	if h.lastKey == "" {
-		return &cell{}
-	}
-	return h.cells[h.lastKey]
-}
-
-// MakeCell returns a new cell iinitialized at next write position.
 // If reuse is specified, a deleted cell of size bigger and closest to size is
-// returned.
-func (h *header) MakeCell(reuse bool, size int64) (c *cell) {
+// returned, if no such cell or not specified returns a new cell initialized.
+func (h *header) GetFreeCell(reuse bool, size int64) (c *cell) {
 
 	if reuse {
-		c = h.deletedCells.Pop(size)
+		c = h.cellBin.Recycle(size)
 		if c.Allocated >= size {
 			if c.CellState != StateDeleted {
 				panic("BzZzz...")
@@ -164,50 +194,52 @@ func (h *header) MakeCell(reuse bool, size int64) (c *cell) {
 		}
 	}
 
-	c = h.lastAddedCell()
-	return &cell{
-		PageIndex: c.PageIndex,
-		Offset:    c.Offset + int64(c.Allocated),
-		Used:      size,
-		Allocated: size,
-		CellState: StateNormal,
-	}
-}
-
-// Add adds a cell to header.
-func (h *header) AddCell(key string, c *cell) {
-	h.cells[string(key)] = c
-	h.lastKey = key
+	c = h.cells.New()
+	c.Used = size
+	c.Allocated = size
+	return
 }
 
 // Cache caches val of cell c under key, imposing cache size limit
 // then returns the updated cell.
-func (h *header) CacheCell(c *cell, key, val []byte, limit int64) *cell {
-	c.key = string(key)
+func (h *header) CacheCell(c *cell, val []byte, limit int64) {
 	c.cache = val
-	h.cachedCells.Push(c, limit)
-	return c
+	h.cellCache.Push(c, limit)
 }
 
 // UnCacheCell removes a cell from cache.
 func (h *header) UnCacheCell(c *cell) {
-	h.cachedCells.Remove(c)
+	h.cellCache.Remove(c)
+}
+
+// Add adds a cell to header.
+func (h *header) AddCell(c *cell) {
+	h.keys[string(c.key)] = c
+	h.lastKey = c.key
 }
 
 // Dirty marks a cell under specified key as dirty.
-func (h *header) MarkCellDirty(key string) {
-	h.dirtyCells[key] = true
+func (h *header) MarkCellDirty(c *cell) {
+	h.dirtyCells[c.key] = c
 }
 
-// MarkCellDeleted marks c as deleted.
-func (h *header) MarkCellDeleted(c *cell) {
-	h.deletedCells.Push(c)
+// TrashCell marks c as deleted.
+func (h *header) TrashCell(c *cell) {
+	h.cellBin.Trash(c)
+}
+
+// UntrashCell removes the cell from the bin.
+func (h *header) UntrashCell(c *cell) {
+	h.cellBin.Remove(c)
 }
 
 // IsKeyUsed checks if a cell under specified key exists.
 func (h *header) IsKeyUsed(key string) bool {
-	c, exists := h.cells[key]
-	return exists && c.CellState != StateDeleted
+	c, exists := h.keys[key]
+	if !exists {
+		return false
+	}
+	return c.CellState != StateDeleted
 }
 
 // LastCellPageIndex returns index of page from last written cell.
@@ -215,7 +247,7 @@ func (h *header) LastCellPageIndex() int64 {
 	if h.lastKey == "" {
 		return 0
 	}
-	return h.cells[h.lastKey].PageIndex
+	return h.keys[h.lastKey].PageIndex
 }
 
 // Close saves dirty cells if they exist and definitely closes the header file.
@@ -233,5 +265,9 @@ func (h *header) Close() (err error) {
 			return
 		}
 	}
+	h.keys = nil
+	h.dirtyCells = nil
+	h.cellBin = nil
+	h.cellCache = nil
 	return
 }

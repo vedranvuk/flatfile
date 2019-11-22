@@ -153,6 +153,7 @@ func (s *stream) Close() (err error) {
 			txt += err.Error()
 		}
 	}
+	s.pages = nil
 	if txt != "" {
 		return fmt.Errorf("page close error: %s", txt)
 	}

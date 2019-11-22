@@ -13,25 +13,26 @@ import (
 // Options defines FlatFile options.
 type Options struct {
 
-	// MirrorDir specifies a directory where an up-to-date exact mirror
-	// copy of the current flatfile will be maintained. If unspecified, no copy
-	// is maintained.
+	// MirrorDir specifies a directory where an exact, up-to-date mirror
+	// copy of the current flatfile will be maintained. If unspecified,
+	// no copy is maintained.
 	// Default value: [none]
 	MirrorDir string
 
-	// CRC specifies if a cell CRC should be done.
+	// CRC specifies if a cell CRC should be done calculated on Put
+	// and checked on Get.
 	// Default value: true
 	CRC bool
-
-	// CachedWrites specifies if write operations should be cached as well.
-	// Used only if a cache is defined.
-	// Default value: false
-	CachedWrites bool
 
 	// MaxCacheMemory specifies maximum cell cache memory to use.
 	// If <= 0 it is disabled.
 	// Default value: 33554432 (32MB)
 	MaxCacheMemory int64
+
+	// CachedWrites specifies if write operations should be cached as well.
+	// Used only if a cache is defined.
+	// Default value: false
+	CachedWrites bool
 
 	// MaxPageSize defines maximum size of a stream page. If <= 0, page size is
 	// of unlimited size.
@@ -49,16 +50,16 @@ type Options struct {
 	// Default value: true
 	PersistentHeader bool
 
+	// Immutable specifies if the file is immutable. If true, Modify and Delete
+	// will fail.
+	// Default value: false
+	Immutable bool
+
 	// SyncWrites specifies if files should be written synchronously. This
 	// circumvents OS write caching, slows down writes considerably and tortures
 	// the disk drive. This option applies to header and stream.
 	// Default value: false
 	SyncWrites bool
-
-	// Immutable specifies if the file is immutable. If true, Modify and Delete
-	// will fail.
-	// Default value: true
-	Immutable bool
 
 	// ZeroPadDeleted specifies if deleted cells should be 0 padded.
 	// Default value: true
@@ -80,13 +81,15 @@ func NewOptions() *Options {
 
 // init initializes options to default values.
 func (o *Options) init() {
-	o.MaxPageSize = 4294967295 // 4GB
-	o.CachedWrites = false
+	o.MirrorDir = ""
+	o.CRC = true
 	o.MaxCacheMemory = 33554432
+	o.CachedWrites = false
+	o.MaxPageSize = 4294967295 // 4GB
 	o.PreallocatePages = true
 	o.PersistentHeader = true
+	o.Immutable = false
 	o.SyncWrites = false
-	o.Immutable = true
 	o.ZeroPadDeleted = true
 }
 
