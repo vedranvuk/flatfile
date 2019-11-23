@@ -28,7 +28,7 @@ func (p *pot) New() (c *cell) {
 	return
 }
 
-// Mask puts a cell into cells replacing unique CellID in the pot.
+// Mask puts a cell into pot replacing any cell with the same CellID.
 func (p *pot) Mask(c *cell) {
 	if c.CellID > p.maxid {
 		p.maxid = c.CellID
@@ -36,8 +36,7 @@ func (p *pot) Mask(c *cell) {
 	p.cells[c.CellID] = c
 }
 
-// Walk walks the cells in the pot.
-// Should f return false, Walk stops.
+// Walk walks the cells in the pot by calling f. Should f return false, Walk stops.
 func (p *pot) Walk(f func(c *cell) bool) {
 	for _, cell := range p.cells {
 		if !f(cell) {

@@ -2,7 +2,6 @@ package flatfile
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"os"
 )
@@ -74,21 +73,21 @@ func (rsk *LimitedReadSeekCloser) seek(offset int64, whence int) (ret int64, err
 	switch whence {
 	case os.SEEK_SET:
 		if offset < 0 || offset > rsk.limit {
-			return 0, fmt.Errorf("%w seek out of bounds", ErrReadSeekCloserLimiter)
+			return 0, ErrFlatFile.Errorf("%w seek out of bounds", ErrReadSeekCloserLimiter)
 		}
 		rsk.ipos = offset
 	case os.SEEK_CUR:
 		if rsk.ipos+offset < 0 || rsk.ipos+offset > rsk.limit {
-			return 0, fmt.Errorf("%w seek out of bounds", ErrReadSeekCloserLimiter)
+			return 0, ErrFlatFile.Errorf("%w seek out of bounds", ErrReadSeekCloserLimiter)
 		}
 		rsk.ipos += offset
 	case os.SEEK_END:
 		if rsk.limit+offset < 0 || rsk.limit+offset > rsk.limit {
-			return 0, fmt.Errorf("%w seek out of bounds", ErrReadSeekCloserLimiter)
+			return 0, ErrFlatFile.Errorf("%w seek out of bounds", ErrReadSeekCloserLimiter)
 		}
 		rsk.limit += offset
 	default:
-		return 0, fmt.Errorf("%w invalid whence", ErrReadSeekCloserLimiter)
+		return 0, ErrFlatFile.Errorf("%w invalid whence", ErrReadSeekCloserLimiter)
 	}
 	return rsk.f.Seek(offset, whence)
 }

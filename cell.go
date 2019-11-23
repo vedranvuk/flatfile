@@ -7,7 +7,6 @@ package flatfile
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
 
 	"github.com/vedranvuk/binaryex"
@@ -25,8 +24,7 @@ const (
 // CellID is the unique cell id.
 type CellID uint64
 
-// cell is an entry in the header.
-// It defines a blob in the stream.
+// cell is an entry in the header. It defines a blob in the stream.
 type cell struct {
 
 	// CellID is the unique ID of a cell.
@@ -75,20 +73,20 @@ func (c *cell) UnmarshalBinary(data []byte) error {
 func (c *cell) write(w io.Writer, key string) (err error) {
 	writer := bufio.NewWriter(w)
 	if err := binaryex.WriteString(writer, key); err != nil {
-		return fmt.Errorf("cell write error: %w", err)
+		return ErrFlatFile.Errorf("cell write error: %w", err)
 	}
 	buffer, err := c.MarshalBinary()
 	if err != nil {
-		return fmt.Errorf("cell write error: %w", err)
+		return ErrFlatFile.Errorf("cell write error: %w", err)
 	}
 	if err = binaryex.WriteNumber(writer, len(buffer)); err != nil {
-		return fmt.Errorf("cell write error: %w", err)
+		return ErrFlatFile.Errorf("cell write error: %w", err)
 	}
 	if _, err = writer.Write(buffer); err != nil {
-		return fmt.Errorf("cell write error: %w", err)
+		return ErrFlatFile.Errorf("cell write error: %w", err)
 	}
 	if err = writer.Flush(); err != nil {
-		return fmt.Errorf("cell write error: %w", err)
+		return ErrFlatFile.Errorf("cell write error: %w", err)
 	}
 	return nil
 }

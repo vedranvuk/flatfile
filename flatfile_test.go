@@ -81,14 +81,19 @@ func TestCRUD(t *testing.T) {
 	if err := os.RemoveAll(testdir); err != nil {
 		t.Fatal(err)
 	}
+	testmirrordir := "test/crudmirror"
+	if err := os.RemoveAll(testmirrordir); err != nil {
+		t.Fatal(err)
+	}
 	// init test data
 	data := make(map[string]string)
-	data["key1"] = "dataA"
-	data["key2"] = "dataB"
-	data["key3"] = "dataC"
+	data["key1"] = "dataK"
+	data["key2"] = "dataF"
+	data["key3"] = "dataJ"
 	// create flatfile
 	options := NewOptions()
 	options.MaxPageSize = -1
+	options.MirrorDir = testmirrordir
 	ff, err := Open(testdir, options)
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +104,7 @@ func TestCRUD(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for loop := 0; loop < 100; loop++ {
+	for loop := 0; loop < 10; loop++ {
 		// save, close, open
 		if err := ff.Reopen(); err != nil {
 			t.Fatal(err)

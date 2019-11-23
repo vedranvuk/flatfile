@@ -27,9 +27,6 @@ func (b *bin) Trash(c *cell) {
 	i := sort.Search(len(b.cells), func(i int) bool {
 		return b.cells[i].Allocated >= c.Allocated
 	})
-	if b.cells[i].CellID == c.CellID {
-		panic("BzZzz...")
-	}
 	b.cells = append(b.cells, nil)
 	copy(b.cells[i+1:], b.cells[i:])
 	b.cells[i] = c
@@ -44,19 +41,17 @@ func (b *bin) Recycle(minsize int64) (c *cell) {
 	i := sort.Search(len(b.cells), func(i int) bool {
 		return b.cells[i].Allocated >= minsize
 	})
-	if i < len(b.cells) {
-		if b.cells[i].Allocated >= minsize {
-			c = b.cells[i]
-			delete(b.cellids, c.CellID)
-			if i < len(b.cells)-1 {
-				copy(b.cells[i:], b.cells[i+1:])
-			}
-			b.cells[len(b.cells)-1] = nil
-			b.cells = b.cells[:len(b.cells)-1]
-			return
-		}
+	if i >= len(b.cells) {
+		return &cell{}
 	}
-	return &cell{}
+	c = b.cells[i]
+	delete(b.cellids, c.CellID)
+	if i < len(b.cells)-1 {
+		copy(b.cells[i:], b.cells[i+1:])
+	}
+	b.cells[len(b.cells)-1] = nil
+	b.cells = b.cells[:len(b.cells)-1]
+	return
 }
 
 // Remove removes a cell from the bin.
@@ -81,6 +76,3 @@ func (b *bin) Remove(c *cell) bool {
 	b.cells = append(b.cells[:i], b.cells[i+1:]...)
 	return true
 }
-
-// Len returns number of cells in the bin.
-func (dc *bin) Len() int { return len(dc.cells) }

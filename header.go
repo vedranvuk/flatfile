@@ -6,7 +6,6 @@ package flatfile
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"os"
 
@@ -32,7 +31,7 @@ type header struct {
 	lastKey string
 
 	// dirtyCells holds cells that haven't been written to header.
-	dirtyCells map[string]*cell
+	dirtyCells map[CellID]*cell
 
 	// cellBin is a slice of deleted cells sorted by cell.Allocated.
 	cellBin *bin
@@ -53,7 +52,7 @@ func newHeader(filename string) (h *header) {
 func (h *header) init() {
 	h.cells = newPot()
 	h.keys = make(map[string]*cell)
-	h.dirtyCells = make(map[string]*cell)
+	h.dirtyCells = make(map[CellID]*cell)
 	h.cellBin = newBin()
 	h.cellCache = newCache()
 }
@@ -81,17 +80,17 @@ func (h *header) OpenOrCreate(sync bool) (err error) {
 }
 
 // LoadCells loads the cells from the header file.
-func (h *header) LoadCells() (lastpage int64, err error) {
+func (h *header) LoadCells(rewriteheader bool) (lastpage int64, err error) {
 	// init.
 	h.init()
 	// read header.
 	buf := make([]byte, 4)
 	if _, err := h.file.Read(buf); err != nil {
-		return 0, fmt.Errorf("header read failed: %w", err)
+		return 0, ErrFlatFile.Errorf("header read failed: %w", err)
 	}
 	for i, v := range buf {
 		if hdr[i] != v {
-			return 0, fmt.Errorf("invalid header")
+			return 0, ErrFlatFile.Errorf("invalid header")
 		}
 	}
 	// temp vars.
@@ -139,47 +138,56 @@ func (h *header) LoadCells() (lastpage int64, err error) {
 		}
 		return true
 	})
-	/*
+	// rewrite header file.
+	if rewriteheader {
 		if err = h.file.Truncate(0); err != nil {
+			return 0, err
+		}
+		if _, err := h.file.Seek(0, os.SEEK_SET); err != nil {
 			return 0, err
 		}
 		if _, err := h.file.Write(hdr[0:]); err != nil {
 			return 0, err
 		}
-	*/
+		if err := h.saveCells(); err != nil {
+			return 0, err
+		}
+	}
 	return maxpage, err
 }
 
-// lastAddedCell returns the last added cell in the header,
-// or if the header is empty, a new empty cell.
-func (h *header) lastAddedCell() *cell {
-	if h.lastKey == "" {
-		return &cell{}
-	}
-	return h.keys[h.lastKey]
+// saveCells saves cells to header.
+func (h *header) saveCells() (err error) {
+	h.cells.Walk(func(c *cell) bool {
+		if err = c.write(h.file, c.key); err != nil {
+			return false
+		}
+		return true
+	})
+	return
 }
 
 // SaveAndClearDirty saves dirty cells to header file then clears dirtyCells.
 func (h *header) SaveAndClearDirty() (err error) {
 
 	if _, err := h.file.Seek(0, os.SEEK_END); err != nil {
-		return fmt.Errorf("header seek error: %w", err)
+		return ErrFlatFile.Errorf("header seek error: %w", err)
 	}
 
-	for key := range h.dirtyCells {
-		cell := h.keys[key]
-		if err = cell.write(h.file, key); err != nil {
+	for _, cval := range h.dirtyCells {
+		if err = cval.write(h.file, cval.key); err != nil {
 			return
 		}
 	}
 	h.dirtyCells = nil
-	h.dirtyCells = make(map[string]*cell)
+	h.dirtyCells = make(map[CellID]*cell)
 
 	return nil
 }
 
-// If reuse is specified, a deleted cell of size bigger and closest to size is
-// returned, if no such cell or not specified returns a new cell initialized.
+// GetFreeCell returns a cell that satisfies size requirement. If reuse is
+// specified, a deleted cell of size bigger and closest to size is returned.
+// If no such cell exists or not specified returns a new cell.
 func (h *header) GetFreeCell(reuse bool, size int64) (c *cell) {
 
 	if reuse {
@@ -220,7 +228,7 @@ func (h *header) AddCell(c *cell) {
 
 // Dirty marks a cell under specified key as dirty.
 func (h *header) MarkCellDirty(c *cell) {
-	h.dirtyCells[c.key] = c
+	h.dirtyCells[c.CellID] = c
 }
 
 // TrashCell marks c as deleted.
@@ -240,14 +248,6 @@ func (h *header) IsKeyUsed(key string) bool {
 		return false
 	}
 	return c.CellState != StateDeleted
-}
-
-// LastCellPageIndex returns index of page from last written cell.
-func (h *header) LastCellPageIndex() int64 {
-	if h.lastKey == "" {
-		return 0
-	}
-	return h.keys[h.lastKey].PageIndex
 }
 
 // Close saves dirty cells if they exist and definitely closes the header file.

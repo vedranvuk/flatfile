@@ -15,8 +15,8 @@ import (
 
 func run(ff FlatFileInterface) time.Duration {
 	locktestoptions := NewLockTestOptions()
-	locktestoptions.Verbose = true
-	locktestoptions.TestDuration = 10 * time.Second
+	locktestoptions.Verbose = false
+	locktestoptions.TestDuration = 60 * time.Second
 	locktestoptions.MinGetDelay = 500
 	locktestoptions.MaxGetDelay = 1000
 	locktestoptions.MinPutDelay = 500
@@ -27,13 +27,13 @@ func run(ff FlatFileInterface) time.Duration {
 	locktestoptions.MaxModDelay = 2000
 	locktestoptions.MaxActiveR = 10
 	locktestoptions.MaxActiveW = 1
-	locktestoptions.MaxActiveD = 10
-	locktestoptions.MaxActiveM = 10
-	locktestoptions.MaxR = 10
-	locktestoptions.MaxW = 10
-	locktestoptions.MaxD = 0
-	locktestoptions.MaxM = 0
-	locktestoptions.QueueSizeR = 10
+	locktestoptions.MaxActiveD = 1
+	locktestoptions.MaxActiveM = 1
+	locktestoptions.MaxR = 50000
+	locktestoptions.MaxW = 10000
+	locktestoptions.MaxD = 5000
+	locktestoptions.MaxM = 1000
+	locktestoptions.QueueSizeR = 100
 	locktestoptions.QueueSizeW = 10
 	locktestoptions.QueueSizeD = 10
 	locktestoptions.QueueSizeM = 10
@@ -55,11 +55,17 @@ func RunForReal() (dur time.Duration) {
 		log.Fatalf("Can't clear test data: %v", err)
 	}
 
+	if err := os.RemoveAll("mirror"); err != nil {
+		log.Fatalf("Can't clear test data: %v", err)
+	}
+
 	options := flatfile.NewOptions()
 	options.Immutable = false
 	options.SyncWrites = false
 	options.PersistentHeader = true
 	options.MaxPageSize = 1048576 // 1MB
+	options.RewriteHeader = true
+	options.MirrorDir = "mirror"
 
 	ff, err := flatfile.Open("testfile", options)
 	if err != nil {
@@ -67,6 +73,10 @@ func RunForReal() (dur time.Duration) {
 	}
 
 	dur = run(ff)
+
+	if err := ff.Reopen(); err != nil {
+		log.Fatalf("FATAL: Reopen: %v\n", err)
+	}
 
 	if ff.Close(); err != nil {
 		log.Fatalf("FATAL: Close: %v\n", err)

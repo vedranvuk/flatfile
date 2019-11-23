@@ -36,6 +36,10 @@ func TestReadSeekLimiter(t *testing.T) {
 		t.Fatal("broken END seek didn't error")
 	}
 
+	if _, err := rsl.Seek(1, 42); err == nil {
+		t.Fatal("broken whence didn't error")
+	}
+
 	buf := make([]byte, 5)
 	if _, err := rsl.Read(buf); err != nil {
 		t.Fatal(err)
@@ -43,11 +47,14 @@ func TestReadSeekLimiter(t *testing.T) {
 	if bytes.Compare(testdata[5:10], buf) != 0 {
 		t.Fatal("missmatch")
 	}
+	if _, err := rsl.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
 
 	buf = make([]byte, 10)
 
 	if _, err := rsl.Read(buf); err != io.EOF {
-		t.Logf("limit exceeded: %w", err)
+		t.Logf("limit exceeded: %v", err)
 	}
 
 }

@@ -65,6 +65,17 @@ type Options struct {
 	// Default value: true
 	ZeroPadDeleted bool
 
+	// RewriteHeader specifies if the header should be trimmed when loaded.
+	// Default value: true
+	RewriteHeader bool
+
+	// UseIntents specifies if intent files should be used. Any destructive
+	// op is described in a separate file before the actual operation. If the
+	// operation fails it can be rolled back using the intent file.
+	// A recovery system which slows things down quite a bit.
+	// Default value: false
+	UseIntents bool
+
 	// filename holds the options filename once options have been persisted.
 	filename string
 
@@ -91,6 +102,7 @@ func (o *Options) init() {
 	o.Immutable = false
 	o.SyncWrites = false
 	o.ZeroPadDeleted = true
+	o.RewriteHeader = true
 }
 
 // Marshal marshals Options to writer w.

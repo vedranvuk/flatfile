@@ -48,7 +48,7 @@ func (s *stream) Open(maxPageID int64, sync bool) error {
 		fn := fmt.Sprintf("%s.%.4d.%s", s.filename, len(s.pages), StreamExt)
 		file, err := os.OpenFile(fn, opt, os.ModePerm)
 		if err != nil {
-			return fmt.Errorf("page file (%s) open error: %w", fn, err)
+			return ErrFlatFile.Errorf("page file (%s) open error: %w", fn, err)
 		}
 		p := &page{
 			filename: fn,
@@ -69,7 +69,7 @@ func (s *stream) newPageFile(filename string, preallocsize int64, prealloc bool)
 		return
 	}
 	if err = file.Truncate(preallocsize); err != nil {
-		err = fmt.Errorf("truncate error: %s; file closed: %w, file removed: %s",
+		err = ErrFlatFile.Errorf("truncate error: %s; file closed: %w, file removed: %s",
 			err, file.Close(), os.Remove(filename))
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func (s *stream) newPage(preallocSize int64, prealloc bool) (int, *page, error) 
 	fn := fmt.Sprintf("%s.%.4d.%s", s.filename, len(s.pages), StreamExt)
 	file, err := s.newPageFile(fn, preallocSize, prealloc)
 	if err != nil {
-		return -1, nil, fmt.Errorf("error creating new page: %w", err)
+		return -1, nil, ErrFlatFile.Errorf("error creating new page: %w", err)
 	}
 	p := &page{
 		filename: fn,
@@ -155,7 +155,7 @@ func (s *stream) Close() (err error) {
 	}
 	s.pages = nil
 	if txt != "" {
-		return fmt.Errorf("page close error: %s", txt)
+		return ErrFlatFile.Errorf("page close error: %s", txt)
 	}
 	return
 }

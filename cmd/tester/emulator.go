@@ -32,7 +32,7 @@ func (ffe *FlatFileEmulator) Put(key, val []byte) error {
 
 	if _, ok := ffe.items[string(key)]; ok {
 		return nil
-		return flatfile.ErrDuplicateKey
+		// return flatfile.ErrDuplicateKey
 	}
 
 	ffe.items[string(key)] = string(val)
