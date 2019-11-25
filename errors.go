@@ -16,8 +16,8 @@ func (ffe FlatFileError) Error() string {
 }
 
 // Unwrap implements error.Unwrap().
-func (ffs FlatFileError) Unwrap() error {
-	return ffs.err
+func (ffe FlatFileError) Unwrap() error {
+	return ffe.err
 }
 
 // Errorf returns a new FlatFileError which wraps an error created from

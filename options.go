@@ -112,5 +112,13 @@ func (o *Options) Marshal(w io.Writer) error {
 
 // Unmarshal unmarshals Options from reader r.
 func (o *Options) Unmarshal(r io.Reader) error {
-	return binaryex.Read(r, o)
+	no := NewOptions()
+	no.init()
+	if err := binaryex.Read(r, no); err != nil {
+		return err
+	}
+	no.filename = o.filename
+	no.mirrored = o.mirrored
+	*o = *no
+	return nil
 }

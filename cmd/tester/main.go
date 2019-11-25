@@ -65,7 +65,7 @@ func RunForReal() (dur time.Duration) {
 	options.PersistentHeader = true
 	options.MaxPageSize = 1048576 // 1MB
 	options.RewriteHeader = true
-	options.MirrorDir = "mirror"
+	options.MirrorDir = "mirror/testfile"
 
 	ff, err := flatfile.Open("testfile", options)
 	if err != nil {

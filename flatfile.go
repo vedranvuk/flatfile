@@ -494,8 +494,3 @@ func (ff *FlatFile) Delete(key []byte) error {
 	}
 	return nil
 }
-
-//
-func (ff *FlatFile) String() string {
-	return ""
-}
