@@ -65,9 +65,10 @@ type Options struct {
 	// Default value: true
 	ZeroPadDeleted bool
 
-	// RewriteHeader specifies if the header should be trimmed when loaded.
+	// CompactHeader specifies if the header should be compacted each time when
+	// loaded from file on session start.
 	// Default value: true
-	RewriteHeader bool
+	CompactHeader bool
 
 	// UseIntents specifies if intent files should be used. Any destructive
 	// op is described in a separate file before the actual operation. If the
@@ -102,7 +103,8 @@ func (o *Options) init() {
 	o.Immutable = false
 	o.SyncWrites = false
 	o.ZeroPadDeleted = true
-	o.RewriteHeader = true
+	o.CompactHeader = true
+	o.UseIntents = false
 }
 
 // Marshal marshals Options to writer w.

@@ -1,6 +1,6 @@
 package flatfile
 
-// pot contains all cells in a flatfile.
+// pot contains all cells in a valid flatfile.
 type pot struct {
 	maxid CellID
 	cells map[CellID]*cell

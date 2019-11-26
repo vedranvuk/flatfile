@@ -30,6 +30,9 @@ type cell struct {
 	// CellID is the unique ID of a cell.
 	CellID
 
+	// CellState is current cell state.
+	CellState
+
 	// PageIndex is the index of the stream page where a blob
 	// that this cell descibes is written.
 	PageIndex int64
@@ -44,17 +47,14 @@ type cell struct {
 	// Used specified how much of Allocated is used. Used <= Allocated.
 	Used int64
 
-	// CellState is current cell state.
-	CellState
-
 	// CRC32 is a crc32 checksum of blob data.
 	CRC32 uint32
 
+	// key is used internally, is the key of a cell, if not deleted.
+	key string
+
 	// Cache is used internally, is the complete blob, in-memory.
 	cache []byte
-
-	// key is used internally.
-	key string
 }
 
 // MarshalBinary marshals the cell to a bite slice.

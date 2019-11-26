@@ -71,22 +71,21 @@ func Open(filename string, options *Options) (*FlatFile, error) {
 	// Check if FlatFile dir already exists and if not, create it.
 	dirExists, err := FileExists(filename)
 	if err != nil {
-		return nil, ErrFlatFile.Errorf(
-			"flatfile dir stat '%s' error: %w", filename, err)
+		return nil, ErrFlatFile.Errorf("base dir '%s' stat error: %w", filename, err)
 	}
 	if !dirExists {
 		if err := os.MkdirAll(filename, os.ModePerm); err != nil {
-			return nil, ErrFlatFile.Errorf("can't create flatfile dir: %w", err)
+			return nil, ErrFlatFile.Errorf("can't create base dir '%s': %w", filename, err)
 		}
 	}
-	// Create a FlatFile
+	// Create a FlatFile.
 	ff := &FlatFile{
 		mutex:   sync.RWMutex{},
 		options: options,
 		header:  newHeader(fmt.Sprintf("%s.%s", filepath.Join(filename, bn), HeaderExt)),
 		stream:  newStream(filepath.Join(filename, bn)),
 	}
-	// load options
+	// load options.
 	if ff.options == nil {
 		ff.options = NewOptions()
 	}
@@ -94,7 +93,11 @@ func Open(filename string, options *Options) (*FlatFile, error) {
 	if err := ff.loadOptions(); err != nil {
 		return nil, err
 	}
-	// Set optional mirror
+	// Load file.
+	if err := ff.load(ff.options.CompactHeader); err != nil {
+		return nil, err
+	}
+	// Setup optional mirror.
 	if ff.options.MirrorDir != "" && !ff.options.mirrored {
 		mirroropt := NewOptions()
 		*mirroropt = *ff.options
@@ -104,10 +107,6 @@ func Open(filename string, options *Options) (*FlatFile, error) {
 			return nil, err
 		}
 		ff.mirror = mirror
-	}
-	// Load stream and pages
-	if err := ff.loadFiles(ff.options.RewriteHeader); err != nil {
-		return nil, err
 	}
 	return ff, nil
 }
@@ -123,40 +122,40 @@ func (ff *FlatFile) loadOptions() error {
 	}
 	file, err := os.OpenFile(ff.options.filename, os.O_RDONLY, os.ModePerm)
 	if err != nil {
-		return err
+		return ErrFlatFile.Errorf("options open error: %w", err)
 	}
 	defer file.Close()
 	return ff.options.Unmarshal(file)
 }
 
-// saveOptions saves options.
+// saveOptions saves options owerwriting existing file.
 func (ff *FlatFile) saveOptions() (err error) {
 	file, err := os.OpenFile(
 		ff.options.filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.ModePerm)
 	if err != nil {
-		return ErrFlatFile.Errorf("options save error: %w", err)
+		return ErrFlatFile.Errorf("options create error: %w", err)
 	}
 	defer file.Close()
 	err = ff.options.Marshal(file)
 	return
 }
 
-// loadFiles
-func (ff *FlatFile) loadFiles(rewriteheader bool) (err error) {
+// load loads FlatFile files.
+func (ff *FlatFile) load(compactheader bool) (err error) {
 	// Open and load the header.
 	if err = ff.header.OpenOrCreate(ff.options.SyncWrites); err != nil {
-		return ErrFlatFile.Errorf("error opening header: %w", err)
+		return ErrFlatFile.Errorf("open header error: %w", err)
 	}
-	maxpage, err := ff.header.LoadCells(rewriteheader)
+	maxpage, err := ff.header.LoadCells(compactheader)
 	if err != nil {
-		return ErrFlatFile.Errorf("error loading header: %w", err)
+		return ErrFlatFile.Errorf("load header error: %w", err)
 	}
 	// Open stream page files.
 	if ff.Len() > 0 {
 		if err = ff.stream.Open(maxpage+1, ff.options.SyncWrites); err != nil {
 
 			ff.header.Close()
-			return ErrFlatFile.Errorf("error opening stream: %w", err)
+			return ErrFlatFile.Errorf("stream open error: %w", err)
 		}
 	}
 	return
@@ -175,7 +174,7 @@ func (ff *FlatFile) updateHeader(cell *cell) error {
 		}
 		if ff.options.SyncWrites {
 			if err := ff.header.file.Sync(); err != nil {
-				return ErrFlatFile.Errorf("header sync failed: %w", err)
+				return ErrFlatFile.Errorf("header sync error: %w", err)
 			}
 		}
 	} else {
@@ -185,8 +184,7 @@ func (ff *FlatFile) updateHeader(cell *cell) error {
 }
 
 // Close closes the FlatFile.
-func (ff *FlatFile) Close() error {
-	// TODO Improve
+func (ff *FlatFile) Close() (err error) {
 	erro := ff.saveOptions()
 	errh := ff.header.Close()
 	errs := ff.stream.Close()
@@ -195,7 +193,7 @@ func (ff *FlatFile) Close() error {
 		errm = ff.mirror.Close()
 	}
 	if erro != nil || errh != nil || errs != nil || errm != nil {
-		return ErrFlatFile.Errorf(`error closing flatfile: 
+		return ErrFlatFile.Errorf(`flatfile close error: 
 	optionserr: %v
 	headererr:  %v
 	streamerr:  %v
@@ -210,7 +208,7 @@ func (ff *FlatFile) Reopen() (err error) {
 	if err = ff.Close(); err != nil {
 		return
 	}
-	if err = ff.loadFiles(ff.options.RewriteHeader); err != nil {
+	if err = ff.load(ff.options.CompactHeader); err != nil {
 		return
 	}
 	if ff.mirror != nil {
@@ -260,7 +258,7 @@ func (ff *FlatFile) Len() int {
 	ff.mutex.RLock()
 	defer ff.mutex.RUnlock()
 
-	return len(ff.header.keys) - len(ff.header.cellBin.cells)
+	return len(ff.header.keys)
 }
 
 // put is the Put implementation.
@@ -288,34 +286,17 @@ func (ff *FlatFile) put(key, val []byte) error {
 		putcell.CRC32 = crc32.ChecksumIEEE(val)
 	}
 	// Cache cell if requested.
-	if ff.options.CachedWrites && ff.options.MaxCacheMemory > 0 && !ff.options.mirrored {
+	if ff.options.MaxCacheMemory > 0 && ff.options.CachedWrites && !ff.options.mirrored {
 		ff.header.CacheCell(putcell, val, ff.options.MaxCacheMemory)
 	}
 	// Get page.
-	putcell, putpage, err := ff.stream.GetCellPage(
-		putcell, ff.options.MaxPageSize, ff.options.PreallocatePages)
+	putpage, err := ff.stream.GetCellPage(putcell, ff.options.MaxPageSize, ff.options.PreallocatePages)
 	if err != nil {
 		return ErrFlatFile.Errorf("page alloc error: %w", err)
 	}
-	// Seek then Write blob.
-	if _, err := putpage.file.Seek(int64(putcell.Offset), os.SEEK_SET); err != nil {
-		return ErrFlatFile.Errorf("stream seek error: %w", err)
-	}
-	if _, err := putpage.file.Write(val); err != nil {
-		return ErrFlatFile.Errorf("stream write error: %w", err)
-	}
-	// Fill the rest with 0s, if requested.
-	if !ff.options.Immutable && ff.options.ZeroPadDeleted && putcell.CellState != StateNormal {
-		buf := make([]byte, putcell.Allocated-putcell.Used)
-		if _, err := putpage.file.Write(buf); err != nil {
-			return ErrFlatFile.Errorf("stream write error: %w", err)
-		}
-	}
-	// Sync if requested.
-	if ff.options.SyncWrites {
-		if err := putpage.file.Sync(); err != nil {
-			return ErrFlatFile.Errorf("stream sync failed: %w", err)
-		}
+	// Write blob.
+	if err := putpage.Put(putcell, val, ff.options.ZeroPadDeleted); err != nil {
+		ErrFlatFile.Errorf("put error: %w", err)
 	}
 	// Update header file.
 	if err := ff.updateHeader(putcell); err != nil {
@@ -355,13 +336,11 @@ func (ff *FlatFile) get(key []byte, walking bool) (blob []byte, err error) {
 		return nil, ErrKeyNotFound
 	}
 	if len(cell.cache) == 0 {
-		file := ff.stream.pages[cell.PageIndex].file
-		if _, err := file.Seek(cell.Offset, os.SEEK_SET); err != nil {
-			return nil, ErrFlatFile.Errorf("stream seek error: %w", err)
-		}
+		page := ff.stream.pages[cell.PageIndex]
 		blob = make([]byte, cell.Used)
-		if _, err = file.Read(blob); err != nil {
-			return nil, ErrFlatFile.Errorf("stream read error: %w", err)
+		blob, err = page.Get(cell)
+		if err != nil {
+			return nil, ErrFlatFile.Errorf("get error: %w", err)
 		}
 		if ff.options.CRC && cell.CRC32 != 0 {
 			crc := crc32.ChecksumIEEE(blob)
@@ -463,7 +442,6 @@ func (ff *FlatFile) delete(key []byte) error {
 		return nil
 	}
 	delete(ff.header.keys, k)
-	cell.cache = nil
 	ff.header.UnCacheCell(cell)
 	ff.header.TrashCell(cell)
 	cell.key = ""

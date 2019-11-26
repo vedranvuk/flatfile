@@ -51,6 +51,7 @@ func (cc *cache) Push(c *cell, maxalloc int64) {
 }
 
 // Remove removes a cell from the cache.
+//
 // Remove clears the actual c cache when removing from queue.
 func (cc *cache) Remove(c *cell) {
 	elem, ok := cc.keys[c.key]

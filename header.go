@@ -80,7 +80,7 @@ func (h *header) OpenOrCreate(sync bool) (err error) {
 }
 
 // LoadCells loads the cells from the header file.
-func (h *header) LoadCells(rewriteheader bool) (lastpage int64, err error) {
+func (h *header) LoadCells(compactheader bool) (lastpage int64, err error) {
 	// init.
 	h.init()
 	// read header.
@@ -139,7 +139,7 @@ func (h *header) LoadCells(rewriteheader bool) (lastpage int64, err error) {
 		return true
 	})
 	// rewrite header file.
-	if rewriteheader {
+	if compactheader {
 		if err = h.file.Truncate(0); err != nil {
 			return 0, err
 		}
