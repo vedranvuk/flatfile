@@ -4,6 +4,10 @@ Package flatfile implements a disk datastore with a key/value interface.
 
 The motivation was to build a simple, small, fast and above all straightforward and easy to use no-delete datastore, but functionality to modify data has been added as well, albeit with drawbacks.
 
+## Status
+
+Few features and an exhaustive test left to implement.
+
 ## Features
 
 * Get, Put, Delete and Modify operations.
