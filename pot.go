@@ -36,6 +36,20 @@ func (p *pot) Mask(c *cell) {
 	p.cells[c.CellID] = c
 }
 
+// Destroy destroys a cell by removing it from the pot.
+func (p *pot) Destroy(c *cell) {
+	_, ok := p.cells[c.CellID]
+	if !ok {
+		return
+	}
+	delete(p.cells, c.CellID)
+	// If deleted cell was last in the bin
+	// reuse pot maxid.
+	if c.CellID == p.maxid {
+		p.maxid--
+	}
+}
+
 // Walk walks the cells in the pot by calling f. Should f return false, Walk stops.
 func (p *pot) Walk(f func(c *cell) bool) {
 	for _, cell := range p.cells {

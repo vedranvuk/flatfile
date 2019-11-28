@@ -49,101 +49,75 @@ func (s *stream) Open(maxPageID int64, sync bool) error {
 	return nil
 }
 
-// newPageFile allocates a file for a new page and returns it or an error.
-func (s *stream) newPageFile(filename string, preallocsize int64, prealloc bool) (file *os.File, err error) {
-	file, err = os.OpenFile(filename, os.O_CREATE|os.O_RDWR, os.ModePerm)
-	if err != nil {
-		return
-	}
-	if !prealloc || preallocsize <= 0 {
-		return
-	}
-	if err = file.Truncate(preallocsize); err != nil {
-		err = ErrFlatFile.Errorf("truncate error: %s; file closed: %w, file removed: %s",
-			err, file.Close(), os.Remove(filename))
-		return nil, err
-	}
-	return
-}
-
-// newPage creates a new page and preallocates the underlying file to
-// specified preallocSize if > 0.
-func (s *stream) newPage(preallocSize int64, prealloc bool) (int, *page, error) {
+// addNewPage creates a new page and preallocates the underlying file to
+// specified preallocSize if prealloc and preallocSize > 0.
+func (s *stream) addNewPage(preallocSize int64, prealloc, sync bool) (idx int, p *page, err error) {
 
 	fn := fmt.Sprintf("%s.%.4d.%s", s.filename, len(s.pages), StreamExt)
-	file, err := s.newPageFile(fn, preallocSize, prealloc)
+	p, err = newPage(fn, preallocSize, prealloc, sync)
 	if err != nil {
 		return -1, nil, ErrFlatFile.Errorf("error creating new page: %w", err)
 	}
-	p := &page{
-		filename: fn,
-		file:     file,
-	}
 	s.pages = append(s.pages, p)
-
-	return len(s.pages) - 1, p, nil
-}
-
-// currentPage returns the current page. If there are no pages in the stream a
-// new page is created and preallocated according to preallocSize.
-func (s *stream) currentPage(preallocSize int64, prealloc bool) (index int, p *page, err error) {
-
-	if len(s.pages) <= 0 {
-		return s.newPage(preallocSize, prealloc)
-	}
-
-	index = len(s.pages) - 1
-	return index, s.pages[index], nil
+	idx = len(s.pages) - 1
+	return
 }
 
 // GetCellPage returns a page for cell c. If no page exists it is created. If
-// cell's bounds exceed page sizelimit a new page is created and returned.
+// adding the cell to page would exceed pageSizeLimit a new page is created.
+// If prealloc, the page is preallocated to pageSizeLimit when created.
 //
 // GetCellPage modifies c.
 //
 // Returns the page or an error if one occured.
-func (s *stream) GetCellPage(c *cell, preallocSize int64, prealloc bool) (*page, error) {
-
-	// Reused cells have their pages.
+func (s *stream) GetCellPage(c *cell, pageSizeLimit int64, prealloc, sync bool) (page *page, err error) {
+	// Reused cells have existing pages,
+	// return cell page by index.
 	if c.CellState != StateNormal {
 		return s.pages[c.PageIndex], nil
 	}
-
-	// Get current page...
-	idx, page, err := s.currentPage(preallocSize, prealloc)
-	if err != nil {
-		return nil, err
+	// Select last page, create if none.
+	pageidx := len(s.pages) - 1
+	if pageidx < 0 {
+		pageidx, page, err = s.addNewPage(pageSizeLimit, prealloc, sync)
+		if err != nil {
+			return
+		}
+	} else {
+		page = s.pages[pageidx]
 	}
-	// ...and advance if required.
-	if preallocSize > 0 {
-		if c.Offset+c.Allocated >= preallocSize {
-			idx, page, err = s.newPage(preallocSize, prealloc)
+	// Create new page if cell overflows current page.
+	if pageSizeLimit > 0 {
+		if c.Offset+c.Allocated >= pageSizeLimit {
+			pageidx, page, err = s.addNewPage(pageSizeLimit, prealloc, sync)
 			if err != nil {
-				return nil, err
+				return
 			}
+			// Update c.
 			c.Offset = 0
 		}
 	}
-	c.PageIndex = int64(idx)
-	return page, nil
+	// Update c.
+	c.PageIndex = int64(pageidx)
+	return
 }
 
 // Close closes the stream pages.
-func (s *stream) Close() (err error) {
-	// TODO x_x
-	txt := ""
-	for _, v := range s.pages {
-		err = v.file.Close()
-		if err != nil {
-			if txt != "" {
-				txt += ", "
+func (s *stream) Close() error {
+	var e error
+	for _, pagev := range s.pages {
+		if err := pagev.Close(); err != nil {
+			err = fmt.Errorf("page '%s' close error: %w", pagev.filename, err)
+			if e != nil {
+				e = fmt.Errorf(", %w", e)
+			} else {
+				e = fmt.Errorf("%w", e)
 			}
-			txt += err.Error()
 		}
 	}
 	s.pages = nil
-	if txt != "" {
-		return ErrFlatFile.Errorf("page close error: %s", txt)
+	if e != nil {
+		return ErrFlatFile.Errorf("error closing one or more pages: %w", e)
 	}
-	return
+	return nil
 }

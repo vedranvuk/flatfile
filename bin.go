@@ -1,10 +1,14 @@
 package flatfile
 
-import "sort"
+import (
+	"sort"
+	"sync"
+)
 
 // bin is a slice of deleted cells.
 // always ordered by cell.Allocated.
 type bin struct {
+	mutex   sync.Mutex
 	cells   []*cell
 	cellids map[CellID]*cell
 }
@@ -21,6 +25,7 @@ func (b *bin) Trash(c *cell) {
 
 	if len(b.cells) == 0 {
 		b.cells = append(b.cells, c)
+		b.cellids[c.CellID] = c
 		return
 	}
 
@@ -45,12 +50,9 @@ func (b *bin) Recycle(minsize int64) (c *cell) {
 		return &cell{}
 	}
 	c = b.cells[i]
+	b.cells[i] = nil
 	delete(b.cellids, c.CellID)
-	if i < len(b.cells)-1 {
-		copy(b.cells[i:], b.cells[i+1:])
-	}
-	b.cells[len(b.cells)-1] = nil
-	b.cells = b.cells[:len(b.cells)-1]
+	b.cells = append(b.cells[:i], b.cells[i+1:]...)
 	return
 }
 
@@ -71,7 +73,7 @@ func (b *bin) Remove(c *cell) bool {
 	if b.cells[i].CellID != c.CellID {
 		return false
 	}
-	delete(b.cellids, b.cells[i].CellID)
+	delete(b.cellids, c.CellID)
 	b.cells[i] = nil
 	b.cells = append(b.cells[:i], b.cells[i+1:]...)
 	return true

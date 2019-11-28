@@ -4,20 +4,12 @@ import (
 	"container/list"
 )
 
-// cache is a fifo queue of cached cells.
-type cache struct {
+// mem is cell cache as a fifo queue.
+// mem modifies cells it holds.
+type mem struct {
 	cells *list.List
 	keys  map[string]*list.Element
 	size  int64
-}
-
-// newCache returns a new cache.
-func newCache() *cache {
-	p := &cache{
-		cells: list.New(),
-		keys:  make(map[string]*list.Element),
-	}
-	return p
 }
 
 // Push pushes a cell to cache by removing cells from the front
@@ -25,7 +17,7 @@ func newCache() *cache {
 // If c is already cached, moves it to the back.
 //
 // Push clears the actual c cache when removing from queue.
-func (cc *cache) Push(c *cell, maxalloc int64) {
+func (cc *mem) Push(c *cell, maxalloc int64) {
 
 	elem, ok := cc.keys[c.key]
 	if ok {
@@ -37,13 +29,13 @@ func (cc *cache) Push(c *cell, maxalloc int64) {
 		if elem == nil {
 			break
 		}
+		if cc.size-c.Used < maxalloc {
+			break
+		}
 		cell := cc.cells.Remove(elem).(*cell)
 		delete(cc.keys, cell.key)
 		cc.size -= cell.Used
 		cell.cache = nil
-		if cc.size-c.Used <= maxalloc {
-			break
-		}
 	}
 	cc.keys[c.key] = cc.cells.PushBack(c)
 	cc.size += c.Used
@@ -53,7 +45,7 @@ func (cc *cache) Push(c *cell, maxalloc int64) {
 // Remove removes a cell from the cache.
 //
 // Remove clears the actual c cache when removing from queue.
-func (cc *cache) Remove(c *cell) {
+func (cc *mem) Remove(c *cell) {
 	elem, ok := cc.keys[c.key]
 	if ok {
 		cc.size -= elem.Value.(*cell).Used
@@ -61,4 +53,13 @@ func (cc *cache) Remove(c *cell) {
 		c.cache = nil
 		delete(cc.keys, c.key)
 	}
+}
+
+// newMem returns a new memory cache.
+func newMem() *mem {
+	p := &mem{
+		cells: list.New(),
+		keys:  make(map[string]*list.Element),
+	}
+	return p
 }

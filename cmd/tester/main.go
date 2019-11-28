@@ -6,6 +6,8 @@ package main
 
 import (
 	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"runtime/pprof"
 	"time"
@@ -64,7 +66,7 @@ func RunForReal() (dur time.Duration) {
 	options.SyncWrites = false
 	options.PersistentHeader = true
 	options.MaxPageSize = 1048576 // 1MB
-	options.RewriteHeader = true
+	options.CompactHeader = true
 	options.MirrorDir = "mirror/testfile"
 
 	ff, err := flatfile.Open("testfile", options)
@@ -86,6 +88,10 @@ func RunForReal() (dur time.Duration) {
 }
 
 func main() {
+	go func() {
+		http.ListenAndServe(":6060", nil)
+	}()
+
 	cputracef, err := os.Create("tester.pprof")
 	if err != nil {
 		panic(err)
@@ -113,5 +119,4 @@ func main() {
 
 	log.Println("---------------------------------------------")
 	log.Printf("Emu took %s, Rly took %s\n", emu, rly)
-
 }

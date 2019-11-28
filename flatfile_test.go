@@ -5,6 +5,7 @@
 package flatfile
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
@@ -21,7 +22,7 @@ func TestFlatFileBasicRW(t *testing.T) {
 	}
 
 	data := make(map[string]string)
-	for i := 0; i < 1024; i++ {
+	for i := 0; i < 10; i++ {
 		key := strings.RandomString(true, true, true, 8)
 		val := strings.RandomString(true, true, true, 8)
 		data[key] = val
@@ -30,6 +31,7 @@ func TestFlatFileBasicRW(t *testing.T) {
 	options := NewOptions()
 	options.PreallocatePages = true
 	options.MaxPageSize = 1024
+	options.UseIntents = true
 	ff, err := Open(testdir, options)
 	if err != nil {
 		t.Fatal(err)
@@ -197,4 +199,46 @@ func TestCRUD(t *testing.T) {
 	if err := ff.Close(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestExtensive(t *testing.T) {
+
+	const (
+		TestDataSize = 256
+		CellDataSize = 8
+	)
+
+	testdata := make(map[string]string)
+	for i := 0; i < TestDataSize; i++ {
+		key := fmt.Sprintf("data%.4d", i)
+		dat := make([]byte, CellDataSize)
+		testdata[key] = string(dat)
+	}
+
+	const (
+		TestDir   = "test/extensive"
+		MirrorDir = "test/extensive/mirror"
+	)
+
+	options := NewOptions()
+	options.MirrorDir = MirrorDir
+	options.CRC = true
+	options.MaxCacheMemory = 1024
+	options.CachedWrites = true
+	options.MaxPageSize = 4096
+	options.PreallocatePages = true
+	options.PersistentHeader = true
+	options.Immutable = false
+	options.SyncWrites = false
+	options.ZeroPadDeleted = true
+	options.CompactHeader = true
+	options.UseIntents = true
+
+	ff, err := Open(TestDir, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ff.Close()
+
 }

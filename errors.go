@@ -22,8 +22,8 @@ func (ffe FlatFileError) Unwrap() error {
 
 // Errorf returns a new FlatFileError which wraps an error created from
 // format string and arguments.
-func (ffe FlatFileError) Errorf(format string, args ...interface{}) FlatFileError {
-	return FlatFileError{fmt.Errorf(format, args...)}
+func (ffe FlatFileError) Errorf(format string, args ...interface{}) *FlatFileError {
+	return &FlatFileError{fmt.Errorf(format, args...)}
 }
 
 var (

@@ -1,8 +1,9 @@
 package flatfile
 
-import "os"
-
-import "bytes"
+import (
+	"bytes"
+	"os"
+)
 
 // page defines and manages a stream page on disk.
 type page struct {
@@ -16,6 +17,7 @@ type page struct {
 
 // Put puts blob into page, ofset and bound by c.
 // If zeropad, a blob smaller than c.Allocated is zeroed.
+// If useintent, an intent file is maintained during the operation.
 func (p *page) Put(c *cell, blob []byte, zeropad bool) (err error) {
 	buf := bytes.NewBuffer(nil)
 	if _, err = buf.Write(blob); err != nil {
@@ -46,4 +48,38 @@ func (p *page) Get(c *cell) (buf []byte, err error) {
 		return nil, ErrFlatFile.Errorf("page write error: %w", err)
 	}
 	return buf, nil
+}
+
+// Close closes the underlying page file.
+func (p *page) Close() (err error) {
+	err = p.file.Close()
+	p.file = nil
+	return
+}
+
+// newPage creates a new page.
+// If prealloc and preallocSize > 0, page file is preallocated to preallocSize.
+// If sync, file is opened for synchronous I/O.
+func newPage(filename string, preallocSize int64, prealloc, sync bool) (p *page, err error) {
+	flags := os.O_CREATE | os.O_RDWR
+	if sync {
+		flags |= os.O_SYNC
+	}
+	file, err := os.OpenFile(filename, flags, os.ModePerm)
+	if err != nil {
+		return nil, ErrFlatFile.Errorf("create page file error: %w", err)
+	}
+	p = &page{
+		filename,
+		file,
+	}
+	if !prealloc || preallocSize <= 0 {
+		return
+	}
+	if err = file.Truncate(preallocSize); err != nil {
+		return nil, ErrFlatFile.Errorf(
+			"truncate error: %s; file close error: %w, file remove error: %s",
+			err, file.Close(), os.Remove(filename))
+	}
+	return
 }
