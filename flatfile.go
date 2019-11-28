@@ -5,31 +5,49 @@
 // Package flatfile implements a flat file disk storage. It is a simple,
 // straightforward key/value store. It supports Get, Put, Modify and Delete.
 //
-// Using Open function which takes a filename of a possibly non-existant
-// directory either creates a flatfile in the directory specified or opens the
-// flatfile from the specified directory if it exists.
+// Intended for use as a standalone datastore or a backend to a more complex
+// storage system. Performance wise, it holds quite OK. Data is immediately
+// addressable so retrieval speed basically depends solely on storage
+// hardware. The idea behind implementation was to sacrifice space for maximum
+// speed and flexibility.
 //
-// Actual 'file' consists of .header, .stream and .options files.
-// Header holds a collection of cells which describe blobs inside a Stream.
-// .options persist Options specified in first session.
+// Actual 'file' consists of .header, one or more .stream files and an .options
+// file. Header holds a collection of cells which describe blobs inside a Stream.
+// Stream holds the blobs and .options persist Options specified in first session.
 //
-// Header is packed, cell entries are of variable length and are loaded once
-// per session and remain in memory until saved and reloaded between sessions.
-// Header serialization can be instant, once on session end, or manual.
-// Stream is always immediately persisted.
+// Header is packed, cell entries are of variable length and are (re)loaded,
+// sequentially, once per session then always remain in memory during a session.
+// Header serialization can be instant or once on session end. If Header
+// serialization is instant, a new cell allocation or a modification of an
+// existing cell is immediately written to Header. This increases data safety
+// and reduces speed but results in Header having multiple records of a single
+// unique cell in different states, as they changed, from start of Header file,
+// towards its' end. By default, header is truncated to hold only unique cell
+// entries each time it is (re)loaded, but can be set to hold the complete
+// history of changes.
 //
-// Stream size can be limited and split across files as pages. In that case Put
-// data size must be less than the page size limit. Pages can be preallocated.
-// A new blob that doesn't fit in the leftover space in a page is stored in a
-// new page and the previous page is left with empty space, if preallocated.
+// Stream is always immediately persisted. Stream size can be limited and split
+// across files as pages. In that case Put data size must be less than the page
+// size limit. Pages can be preallocated. A new blob that doesn't fit in the
+// leftover space in a page is stored in a new page and the previous page is
+// left with empty space, if preallocated.
 //
-// Delete simply marks the cell as deleted. Successive Puts will reuse deleted
-// cells if their allocated blob space is as bigger and as close as possible to
-// Put data size. If there are no such cells a new one is created. Once
-// allocated, blob space cannot be resized but can be reused.
+// Any changes to Stream not backed by cell entries in Header are lost and
+// eventually possibly overwritten. For example, if a power outage occurs during
+// a session where Header is set to persist on session end and there were
+// modifications to the file.
 //
-// Both the Header and Stream can be recreated manually to prune modified cells
-// and pack the .header and .stream to smallest possible size using Compact().
+// Cells, when newly created, allocate space in the Stream of same size as the
+// Put operation data that initiated it. As both Header and Stream are written
+// sequentially cells and blobs can't be resized once allocated but blobs can
+// be reused after they have been deleted.
+//
+// Deletes simply mark cells as deleted. Successive Puts will try and reuse
+// deleted cells if a deleted cell with allocated blob space which is bigger
+// and as close as possible to Put data size is found. If there are no such
+// cells a new one is created.
+//
+// FlatFile can be Compacted to trim unused space both from Header and Stream.
 package flatfile
 
 import (
@@ -59,9 +77,9 @@ type FlatFile struct {
 	mirror  *FlatFile
 }
 
-// Open opens an existing or creates a new flatfile. filename is a name of a
-// directory where header and stream files consisting flatfile are located.
-// Close() should be called after use to free the file descriptors.
+// Open opens an existing or creates a new FlatFile in the
+// base directory of filename. Close() MUST be called after
+// use to free resources and open file descriptors.
 func Open(filename string, options *Options) (*FlatFile, error) {
 
 	// Extract FlatFile name from the base of the specified filename.
@@ -114,7 +132,7 @@ func Open(filename string, options *Options) (*FlatFile, error) {
 	return ff, nil
 }
 
-// loadOptions loads options if they exist.
+// loadOptions loads options, if they exist.
 func (ff *FlatFile) loadOptions() error {
 	exists, err := FileExists(ff.options.filename)
 	if err != nil {
@@ -143,12 +161,12 @@ func (ff *FlatFile) saveOptions() (err error) {
 	return
 }
 
-// load loads FlatFile files.
+// load loads the Header and Stream.
 func (ff *FlatFile) load(compactheader bool) (err error) {
 	// Open and load the header.
 	maxpage, err := ff.header.Open(ff.options.CompactHeader, ff.options.SyncWrites)
 	if err != nil {
-		return ErrFlatFile.Errorf("open header error: %w", err)
+		return ErrFlatFile.Errorf("header open error: %w", err)
 	}
 	// No keys.
 	if ff.Len() == 0 {
@@ -160,23 +178,6 @@ func (ff *FlatFile) load(compactheader bool) (err error) {
 		return ErrFlatFile.Errorf("stream open error: %w", err)
 	}
 	return
-}
-
-// updateHeader updates header.
-// If SyncHeader is enabled, seek to header end, write length of binary
-// encoded cell then the cell itself, otherwise mark cell dirty.
-func (ff *FlatFile) updateHeader(cell *cell) error {
-	if ff.options.PersistentHeader {
-		if _, err := ff.header.file.Seek(0, os.SEEK_END); err != nil {
-			return ErrFlatFile.Errorf("header seek error: %w", err)
-		}
-		if err := cell.write(ff.header.file, string(cell.key)); err != nil {
-			return err
-		}
-	} else {
-		ff.header.Dirty(cell)
-	}
-	return nil
 }
 
 // Close closes the FlatFile.
@@ -313,7 +314,7 @@ func (ff *FlatFile) put(key, val []byte) error {
 		return ErrFlatFile.Errorf("put error: %w", err)
 	}
 	// Update header file.
-	if err := ff.updateHeader(putcell); err != nil {
+	if err := ff.header.Update(putcell, ff.options.PersistentHeader); err != nil {
 		undoputcell(putcell)
 		return ErrFlatFile.Errorf("put error: %w", err)
 	}
@@ -466,7 +467,7 @@ func (ff *FlatFile) delete(key []byte) error {
 	cell.CRC32 = 0
 	cell.CellState = StateDeleted
 
-	return ff.updateHeader(cell)
+	return ff.header.Update(cell, ff.options.PersistentHeader)
 }
 
 // Delete marks a blob specified under key as deleted. If an error occurs it

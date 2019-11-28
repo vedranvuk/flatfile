@@ -19,7 +19,7 @@ Put keys a data blob, writes it to Stream then marks it using a cell stored to H
 
 Deleted blobs are reused by picking the blob that is closest and at least the size of Put at Put time. Rest of reused blob is empty until next possible reuse which can be more or less space efficient. If no deleted blobs can hold Put, a new blob is created. Blobs are always written in single chunks and don't span across pages. If there is a Page size limit, Put blob must be smaller than a page.
 
-This approach gives fast, direct I/O but data modifications cause fragmentation. To battle blob data fragmentation Stream pages can be preallocated. To minimize wasted space which results from zero-padding the unused space of reused cells a manual Concat function can re-create the Stream, at runtime or otherwise.
+This approach gives fast, direct I/O but data modifications cause fragmentation during writes. To battle blob data fragmentation Stream pages can be preallocated. To minimize wasted space which results from zero-padding the unused space of reused cells a manual Concat function can re-create the Stream, at runtime or otherwise.
 
 For redundancy, FlatFile can maintain an up-to-date mirror copy of itself in a separate location at runtime. To battle data loss caused by a power outage in the middle of a write with OS disk-write-caching enabled Intent files can be used during process of data modification.
 
@@ -45,7 +45,7 @@ The main functionality of FlatFile is exposed in several methods.
 ## Cons
 
 * Waste space introduced with each Delete and Modify operation.
-* Potentional fragmentation increased with non-preallocated stream.
+* Potentinal fragmentation increased with non-preallocated stream.
 
 ## License
 

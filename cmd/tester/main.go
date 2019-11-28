@@ -7,12 +7,13 @@ package main
 import (
 	"log"
 	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"runtime/pprof"
 	"time"
 
 	"github.com/vedranvuk/flatfile"
+
+	_ "net/http/pprof"
 )
 
 func run(ff FlatFileInterface) time.Duration {

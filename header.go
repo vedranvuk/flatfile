@@ -188,9 +188,10 @@ func (h *header) save() (err error) {
 	return
 }
 
-// Select returns a cell that satisfies size requirement. If reuse is
-// specified, a deleted cell of size bigger and closest to size is returned.
-// If no such cell exists or not specified returns a new cell.
+// Select is the main cell allocation function. It either returns an
+// existing, deleted cell whose Allocated satisfies size requirement
+// if reuse is specified, or a new empty cell if none such found or
+// reuse wasn't specified.
 func (h *header) Select(reuse bool, size int64) (c *cell) {
 
 	if reuse {
@@ -215,6 +216,21 @@ func (h *header) Select(reuse bool, size int64) (c *cell) {
 func (h *header) Use(c *cell) {
 	h.keys[string(c.key)] = c
 	h.lastKey = c.key
+}
+
+// Update updates the cell in the header.
+func (h *header) Update(c *cell, immediate bool) error {
+	if immediate {
+		if _, err := h.file.Seek(0, os.SEEK_END); err != nil {
+			return ErrFlatFile.Errorf("header seek error: %w", err)
+		}
+		if err := c.write(h.file, string(c.key)); err != nil {
+			return err
+		}
+	} else {
+		h.Endirty(c)
+	}
+	return nil
 }
 
 // Destroy destroys a cell removing it from the bin.
@@ -244,8 +260,8 @@ func (h *header) Restore(c *cell) {
 	h.trash.Remove(c)
 }
 
-// Dirty marks a cell under specified key as dirty.
-func (h *header) Dirty(c *cell) {
+// Endirty marks a cell under specified key as dirty.
+func (h *header) Endirty(c *cell) {
 	h.dirty[c.CellID] = c
 }
 
