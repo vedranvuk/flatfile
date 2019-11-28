@@ -8,11 +8,17 @@ import (
 )
 
 func TestReadSeekLimiter(t *testing.T) {
-	file, err := os.OpenFile("testrsl.dat", os.O_CREATE|os.O_RDWR, os.ModePerm)
+
+	const (
+		testfile = "test/testrsl.dat"
+	)
+
+	file, err := os.OpenFile(testfile, os.O_CREATE|os.O_RDWR, os.ModePerm)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer file.Close()
+	defer os.RemoveAll(testfile)
 
 	var testdata = []byte("abcdefghijklmno")
 	if _, err := file.Write(testdata); err != nil {

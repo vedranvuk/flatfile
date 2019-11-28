@@ -283,7 +283,25 @@ func (h *header) Flush() (err error) {
 }
 
 // IsKeyUsed checks if a cell under specified key exists.
-func (h *header) IsKeyUsed(key string) bool {
-	_, exists := h.keys[key]
-	return exists
+func (h *header) IsKeyUsed(key []byte) (used bool) {
+	_, used = h.keys[string(key)]
+	return
+}
+
+// Cell returns a cell by key if found and a truth if it exists.
+func (h *header) Cell(key []byte) (c *cell, ok bool) {
+	c, ok = h.keys[string(key)]
+	return
+}
+
+// Keys returns all keys in the header.
+func (h *header) Keys() (result [][]byte) {
+	result = make([][]byte, len(h.keys))
+	i := 0
+	for key := range h.keys {
+		result[i] = make([]byte, len([]byte(key)))
+		copy(result[i], key)
+		i++
+	}
+	return
 }

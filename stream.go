@@ -121,3 +121,8 @@ func (s *stream) Close() error {
 	}
 	return nil
 }
+
+// Page retrieves a page by index.
+func (s *stream) Page(c *cell) *page {
+	return s.pages[int(c.PageIndex)]
+}

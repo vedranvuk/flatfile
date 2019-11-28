@@ -1,14 +1,18 @@
 package flatfile
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestHeader(t *testing.T) {
 
 	const (
-		HeaderFilename = "test/headertest"
+		headertest = "test/headertest"
 	)
+	defer os.RemoveAll(headertest)
 
-	hdr := newHeader(HeaderFilename)
+	hdr := newHeader(headertest)
 	if _, err := hdr.Open(true, false); err != nil {
 		t.Fatal(err)
 	}

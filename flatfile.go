@@ -33,9 +33,16 @@
 // left with empty space, if preallocated.
 //
 // Any changes to Stream not backed by cell entries in Header are lost and
-// eventually possibly overwritten. For example, if a power outage occurs during
-// a session where Header is set to persist on session end and there were
+// eventually possibly overwritten. For example, in case a power outage occurs
+// during a session where Header is set to persist on session end and there were
 // modifications to the file.
+//
+// Intents can be used when writing reused blobs. Intents backup cell and blob
+// before writing into blob. After a mid-write power failure, when FlatFile is
+// opened it looks for Intent files and if any found, restores cells and blobs,
+// them removes the intents.
+// In case a new cell is being added and failure occurs mid-write, write will
+// simply fail and any data partially written will be trimmed on next Open.
 //
 // Cells, when newly created, allocate space in the Stream of same size as the
 // Put operation data that initiated it. As both Header and Stream are written
@@ -168,7 +175,7 @@ func (ff *FlatFile) load(compactheader bool) (err error) {
 	if err != nil {
 		return ErrFlatFile.Errorf("header open error: %w", err)
 	}
-	// No keys.
+	// No keys loaded, no pages.
 	if ff.Len() == 0 {
 		return
 	}
@@ -202,6 +209,7 @@ func (ff *FlatFile) Close() (err error) {
 
 // Reopen closes and reopens header and stream.
 func (ff *FlatFile) Reopen() (err error) {
+
 	if err = ff.Close(); err != nil {
 		return
 	}
@@ -223,12 +231,10 @@ func (ff *FlatFile) Walk(f func(key, val []byte) bool) error {
 	ff.mutex.Lock()
 	defer ff.mutex.Unlock()
 
-	for k := range ff.header.keys {
-		data, err := ff.get([]byte(k), true)
+	keys := ff.header.Keys()
+	for _, k := range keys {
+		data, err := ff.get(k, false)
 		if err != nil {
-			if err == ErrKeyNotFound {
-				continue
-			}
 			return err
 		}
 		if !f([]byte(k), data) {
@@ -236,6 +242,13 @@ func (ff *FlatFile) Walk(f func(key, val []byte) bool) error {
 		}
 	}
 	return nil
+}
+
+// Keys returns all keys in the file.
+func (ff *FlatFile) Keys() (keys [][]byte) {
+	ff.mutex.Lock()
+	defer ff.mutex.Unlock()
+	return ff.header.Keys()
 }
 
 // Compact compacts header and stream into a temp file then rotates them with
@@ -263,7 +276,7 @@ func (ff *FlatFile) Len() int {
 // overwritten on next Put.
 func (ff *FlatFile) put(key, val []byte) error {
 	// undoputcell undoes states made for putcell.
-	// Mid-op error cleanup.
+	// Mid-put error cleanup.
 	undoputcell := func(c *cell) {
 		switch c.CellState {
 		case StateNormal:
@@ -275,11 +288,8 @@ func (ff *FlatFile) put(key, val []byte) error {
 		}
 	}
 	// Check key validity.
-	if len(key) == 0 {
-		return ErrInvalidKey
-	}
 	// Check if key is in use.
-	if ff.header.IsKeyUsed(string(key)) {
+	if ff.header.IsKeyUsed(key) {
 		return ErrDuplicateKey
 	}
 	// Check if data is bigger than page size.
@@ -326,6 +336,10 @@ func (ff *FlatFile) put(key, val []byte) error {
 // Put puts val into FlatFile under key or returns an error if one occurs.
 func (ff *FlatFile) Put(key, val []byte) error {
 
+	if len(key) == 0 {
+		return ErrInvalidKey
+	}
+
 	ff.mutex.Lock()
 	defer ff.mutex.Unlock()
 
@@ -341,18 +355,21 @@ func (ff *FlatFile) Put(key, val []byte) error {
 }
 
 // get is the Get implementation.
-func (ff *FlatFile) get(key []byte, walking bool) (blob []byte, err error) {
+func (ff *FlatFile) get(key []byte, cache bool) (blob []byte, err error) {
 	// Check key.
-	if len(key) == 0 {
-		return nil, ErrInvalidKey
-	}
-	cell, ok := ff.header.keys[string(key)]
+	cell, ok := ff.header.Cell(key)
 	if !ok {
 		return nil, ErrKeyNotFound
 	}
 	// Retrieve blob.
-	if len(cell.cache) == 0 {
-		page := ff.stream.pages[cell.PageIndex]
+	if len(cell.cache) > 0 {
+		// From cache.
+		blob = make([]byte, cell.Used)
+		copy(blob, cell.cache)
+		return
+	} else {
+		// From page.
+		page := ff.stream.Page(cell)
 		blob = make([]byte, cell.Used)
 		blob, err = page.Get(cell)
 		if err != nil {
@@ -364,16 +381,25 @@ func (ff *FlatFile) get(key []byte, walking bool) (blob []byte, err error) {
 				return nil, ErrChecksumFailed
 			}
 		}
-	} else {
-		blob = cell.cache
 	}
 	// Cache cell if requested.
-	if ff.options.MaxCacheMemory > 0 && !walking {
-		if cell.cache == nil {
-			cell.cache = blob
-		}
-		ff.header.Cache(cell, blob, ff.options.MaxCacheMemory)
+	if !cache {
+		return
 	}
+	// No cache on a mirror.
+	if ff.options.mirrored {
+		return
+	}
+	// No cache defined.
+	if ff.options.MaxCacheMemory <= 0 {
+		return
+	}
+	// Set cache if empty.
+	if cell.cache == nil {
+		cell.cache = make([]byte, cell.Used)
+		copy(cell.cache, blob)
+	}
+	ff.header.Cache(cell, blob, ff.options.MaxCacheMemory)
 	return
 }
 
@@ -383,6 +409,10 @@ func (ff *FlatFile) Get(key []byte) (blob []byte, err error) {
 
 	ff.mutex.RLock()
 	defer ff.mutex.RUnlock()
+
+	if len(key) == 0 {
+		return nil, ErrInvalidKey
+	}
 
 	return ff.get(key, false)
 }
@@ -427,7 +457,7 @@ func (ff *FlatFile) Modify(key, val []byte) (err error) {
 	ff.mutex.Lock()
 	defer ff.mutex.Unlock()
 
-	if _, ok := ff.header.keys[string(key)]; !ok {
+	if !ff.header.IsKeyUsed(key) {
 		return ErrKeyNotFound
 	}
 	if ff.options.MaxPageSize > 0 && int64(len(val)) > ff.options.MaxPageSize {
@@ -453,12 +483,9 @@ func (ff *FlatFile) delete(key []byte) error {
 
 	k := string(key)
 
-	cell, ok := ff.header.keys[k]
+	cell, ok := ff.header.Cell(key)
 	if !ok {
 		return ErrKeyNotFound
-	}
-	if cell.CellState == StateDeleted {
-		return nil
 	}
 	delete(ff.header.keys, k)
 	ff.header.UnCache(cell)

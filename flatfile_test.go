@@ -17,9 +17,7 @@ import (
 func TestFlatFileBasicRW(t *testing.T) {
 
 	testdir := "test/basicrw"
-	if err := os.RemoveAll(testdir); err != nil {
-		t.Fatal(err)
-	}
+	defer os.RemoveAll(testdir)
 
 	data := make(map[string]string)
 	for i := 0; i < 10; i++ {
@@ -80,13 +78,11 @@ func TestCRUD(t *testing.T) {
 
 	// remove temp files
 	testdir := "test/crud"
-	if err := os.RemoveAll(testdir); err != nil {
-		t.Fatal(err)
-	}
+	defer os.RemoveAll(testdir)
+
 	testmirrordir := "test/crudmirror"
-	if err := os.RemoveAll(testmirrordir); err != nil {
-		t.Fatal(err)
-	}
+	defer os.RemoveAll(testmirrordir)
+
 	// init test data
 	data := make(map[string]string)
 	data["key1"] = "dataK"
@@ -216,12 +212,14 @@ func TestExtensive(t *testing.T) {
 	}
 
 	const (
-		TestDir   = "test/extensive"
-		MirrorDir = "test/extensive/mirror"
+		testdir   = "test/extensive"
+		mirrordir = "test/extensive/mirror"
 	)
+	defer os.RemoveAll(testdir)
+	defer os.RemoveAll(mirrordir)
 
 	options := NewOptions()
-	options.MirrorDir = MirrorDir
+	options.MirrorDir = mirrordir
 	options.CRC = true
 	options.MaxCacheMemory = 1024
 	options.CachedWrites = true
@@ -234,11 +232,295 @@ func TestExtensive(t *testing.T) {
 	options.CompactHeader = true
 	options.UseIntents = true
 
-	ff, err := Open(TestDir, options)
+	ff, err := Open(testdir, options)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	ff.Close()
 
+}
+
+func TestWalk(t *testing.T) {
+
+	testdir := "test/walk"
+	defer os.RemoveAll(testdir)
+
+	data := make(map[string]string)
+	for i := 0; i < 10; i++ {
+		key := strings.RandomString(true, true, true, 8)
+		val := strings.RandomString(true, true, true, 8)
+		data[key] = val
+	}
+
+	ff, err := Open(testdir, NewOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ff.Close()
+
+	for k, v := range data {
+		if err := ff.Put([]byte(k), []byte(v)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := ff.Walk(func(key, val []byte) bool {
+		if string(val) != string(data[string(key)]) {
+			t.Fatalf("walk failed, want: '%s', got '%s'\n", string(val), string(data[string(key)]))
+		}
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestKeys(t *testing.T) {
+
+	testdir := "test/keys"
+	defer os.RemoveAll(testdir)
+
+	data := make(map[string]string)
+	for i := 0; i < 1024; i++ {
+		key := strings.RandomString(true, true, true, 8)
+		val := strings.RandomString(true, true, true, 8)
+		data[key] = val
+	}
+
+	ff, err := Open(testdir, NewOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ff.Close()
+
+	for k, v := range data {
+		if err := ff.Put([]byte(k), []byte(v)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	keys := ff.Keys()
+	if len(keys) != len(data) {
+		t.Fatalf("keys failed, want %d keys, got %d\n", len(data), len(keys))
+	}
+
+	for datak, datav := range data {
+		blob, err := ff.Get([]byte(datak))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(blob) != datav {
+			t.Fatalf("keys failed, want '%s', got '%s'", string(datav), string(blob))
+		}
+	}
+}
+
+func benchmarkGet(b *testing.B, options *Options) {
+
+	b.StopTimer()
+
+	const (
+		testdir = "test/benchmark/reads"
+	)
+	defer os.RemoveAll(testdir)
+
+	ff, err := Open(testdir, options)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	datai := []string{}
+	datam := make(map[string]string)
+	for i := 0; i < b.N; i++ {
+		key := ""
+		for {
+			key = strings.RandomString(true, true, true, 8)
+			if _, ok := datam[key]; !ok {
+				break
+			}
+		}
+		val := strings.RandomString(true, true, true, 16)
+		datam[key] = val
+		datai = append(datai, key)
+		if err = ff.Put([]byte(key), []byte(val)); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		key := datai[i]
+		if _, err := ff.Get([]byte(key)); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.StopTimer()
+
+	if err = ff.Close(); err != nil {
+		b.Fatal(err)
+	}
+}
+
+func benchmarkPut(b *testing.B, options *Options) {
+
+	b.StopTimer()
+
+	const (
+		testdir = "test/benchmark/writes"
+	)
+	defer os.RemoveAll(testdir)
+
+	ff, err := Open(testdir, options)
+	if err != nil {
+		b.Fatal(err)
+	}
+	datai := []string{}
+	datam := make(map[string]string)
+	for i := 0; i < b.N; i++ {
+		key := ""
+		for {
+			key = strings.RandomString(true, true, true, 8)
+			if _, ok := datam[key]; !ok {
+				break
+			}
+		}
+		val := strings.RandomString(true, true, true, 24)
+		datai = append(datai, key)
+		datam[key] = val
+	}
+
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		key := datai[i]
+		val := datam[key]
+		if err := ff.Put([]byte(key), []byte(val)); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.StopTimer()
+
+	if err = ff.Close(); err != nil {
+		b.Fatal(err)
+	}
+}
+
+func benchmarkDelete(b *testing.B, options *Options) {
+
+	b.StopTimer()
+
+	const (
+		testdir = "test/benchmark/reads"
+	)
+	defer os.RemoveAll(testdir)
+
+	ff, err := Open(testdir, options)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	datai := []string{}
+	datam := make(map[string]string)
+	for i := 0; i < b.N; i++ {
+		key := ""
+		for {
+			key = strings.RandomString(true, true, true, 8)
+			if _, ok := datam[key]; !ok {
+				break
+			}
+		}
+		val := strings.RandomString(true, true, true, 16)
+		datam[key] = val
+		datai = append(datai, key)
+		if err = ff.Put([]byte(key), []byte(val)); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		key := datai[i]
+		if err := ff.Delete([]byte(key)); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.StopTimer()
+
+	if err = ff.Close(); err != nil {
+		b.Fatal(err)
+	}
+}
+
+func benchmarkModify(b *testing.B, options *Options) {
+
+	b.StopTimer()
+
+	const (
+		testdir = "test/benchmark/reads"
+	)
+	defer os.RemoveAll(testdir)
+
+	ff, err := Open(testdir, options)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	datai := []string{}
+	datam := make(map[string]string)
+	mdatam := make(map[string]string)
+	for i := 0; i < b.N; i++ {
+		key := ""
+		for {
+			key = strings.RandomString(true, true, true, 8)
+			if _, ok := datam[key]; !ok {
+				break
+			}
+		}
+		val := strings.RandomString(true, true, true, 16)
+		mval := ""
+		for {
+			if mval != val {
+				break
+			}
+		}
+		datam[key] = val
+		mdatam[key] = mval
+		datai = append(datai, key)
+		if err = ff.Put([]byte(key), []byte(val)); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		key := datai[i]
+		mval := mdatam[key]
+		if err := ff.Modify([]byte(key), []byte(mval)); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.StopTimer()
+
+	if err = ff.Close(); err != nil {
+		b.Fatal(err)
+	}
+}
+
+func BenchmarkPut(b *testing.B) {
+	options := NewOptions()
+	benchmarkPut(b, options)
+}
+
+func BenchmarkGet(b *testing.B) {
+	options := NewOptions()
+	benchmarkGet(b, options)
+}
+
+func BenchmarkDelete(b *testing.B) {
+	options := NewOptions()
+	benchmarkDelete(b, options)
+}
+
+func BenchmarkModify(b *testing.B) {
+	options := NewOptions()
+	benchmarkModify(b, options)
 }
