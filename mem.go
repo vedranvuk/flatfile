@@ -46,6 +46,7 @@ func (cc *mem) Push(c *cell, maxalloc int64) {
 //
 // Remove clears the actual c cache when removing from queue.
 func (cc *mem) Remove(c *cell) {
+
 	elem, ok := cc.keys[c.key]
 	if ok {
 		cc.size -= elem.Value.(*cell).Used

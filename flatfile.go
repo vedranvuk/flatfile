@@ -70,18 +70,20 @@ import (
 const (
 	HeaderExt  = "header"
 	StreamExt  = "stream"
-	OptionsExt = "options"
-	IntentExt  = "intent"
 	ConcatExt  = "concat"
+	OptionsExt = "options"
+	IntentsExt = "intents"
 )
 
 // FlatFile represents the actual flat file.
 type FlatFile struct {
-	mutex   sync.RWMutex
-	options *Options
-	header  *header
-	stream  *stream
-	mirror  *FlatFile
+	mutex    sync.RWMutex
+	filename string
+	options  *Options
+	header   *header
+	stream   *stream
+	intents  *intents
+	mirror   *FlatFile
 }
 
 // Open opens an existing or creates a new FlatFile in the
@@ -106,11 +108,21 @@ func Open(filename string, options *Options) (*FlatFile, error) {
 	}
 	// Create a FlatFile.
 	ff := &FlatFile{
-		mutex:   sync.RWMutex{},
-		options: options,
-		header:  newHeader(fmt.Sprintf("%s.%s", filepath.Join(filename, bn), HeaderExt)),
-		stream:  newStream(filepath.Join(filename, bn)),
+		mutex:    sync.RWMutex{},
+		filename: filename,
+		options:  options,
+		header:   newHeader(fmt.Sprintf("%s.%s", filepath.Join(filename, bn), HeaderExt)),
+		stream:   newStream(filepath.Join(filename, bn)),
+		intents:  newIntents(fmt.Sprintf("%s.%s", filepath.Join(filename, bn), IntentsExt)),
 	}
+	// Create intents.
+	/*
+		intents, err := newIntents(fmt.Sprintf("%s.%s", filepath.Join(filename, bn), IntentsExt))
+		if err != nil {
+			return nil, err
+		}
+		ff.intents = intents
+	*/
 	// load options.
 	if ff.options == nil {
 		ff.options = NewOptions()
@@ -123,8 +135,6 @@ func Open(filename string, options *Options) (*FlatFile, error) {
 	if err := ff.load(ff.options.CompactHeader); err != nil {
 		return nil, err
 	}
-	// Check intents.
-	// TODO Check intents.
 	// Setup optional mirror.
 	if ff.options.MirrorDir != "" && !ff.options.mirrored {
 		mirroropt := NewOptions()
@@ -168,6 +178,31 @@ func (ff *FlatFile) saveOptions() (err error) {
 	return
 }
 
+// restoreFromIntents restores cells from intents.
+func (ff *FlatFile) restoreFromIntents() error {
+
+	ff.mutex.Lock()
+	defer ff.mutex.Unlock()
+
+	// Check intents.
+	itts, err := ff.intents.Check()
+	if err != nil {
+		return err
+	}
+	for _, itt := range itts {
+		switch itt.Operation {
+		case OpPut:
+			if err := ff.put(itt.Key, itt.Blob); err != nil {
+
+			}
+		case OpDelete:
+		default:
+			return ErrFlatFile.Errorf("unexpected value")
+		}
+	}
+	return nil
+}
+
 // load loads the Header and Stream.
 func (ff *FlatFile) load(compactheader bool) (err error) {
 	// Open and load the header.
@@ -175,14 +210,16 @@ func (ff *FlatFile) load(compactheader bool) (err error) {
 	if err != nil {
 		return ErrFlatFile.Errorf("header open error: %w", err)
 	}
-	// No keys loaded, no pages.
-	if ff.Len() == 0 {
-		return
-	}
 	// Open stream page files.
-	if err = ff.stream.Open(maxpage+1, ff.options.SyncWrites); err != nil {
-		ff.header.Close()
-		return ErrFlatFile.Errorf("stream open error: %w", err)
+	if ff.Len() > 0 {
+		if err = ff.stream.Open(maxpage+1, ff.options.SyncWrites); err != nil {
+			ff.header.Close()
+			return ErrFlatFile.Errorf("stream open error: %w", err)
+		}
+	}
+	// Check intents.
+	if err = ff.restoreFromIntents(); err != nil {
+		return ErrFlatFile.Errorf("intents load error: %w", err)
 	}
 	return
 }
@@ -192,17 +229,19 @@ func (ff *FlatFile) Close() (err error) {
 	erro := ff.saveOptions()
 	errh := ff.header.Close()
 	errs := ff.stream.Close()
+	erri := ff.intents.Close()
 	errm := error(nil)
 	if ff.mirror != nil {
 		errm = ff.mirror.Close()
 	}
-	if erro != nil || errh != nil || errs != nil || errm != nil {
+	if erro != nil || errh != nil || errs != nil || erri != nil || errm != nil {
 		return ErrFlatFile.Errorf(`close errors: 
 	options: %v
 	header:  %v
 	stream:  %v
+	intents: %v
 	mirror:  %v`,
-			erro, errh, errs, errm)
+			erro, errh, errs, erri, errm)
 	}
 	return nil
 }
@@ -274,7 +313,7 @@ func (ff *FlatFile) Len() int {
 // put is the Put implementation.
 // If a put fails mid-write, any data that is partially written will be
 // overwritten on next Put.
-func (ff *FlatFile) put(key, val []byte) error {
+func (ff *FlatFile) put(key, val []byte) (err error) {
 	// undoputcell undoes states made for putcell.
 	// Mid-put error cleanup.
 	undoputcell := func(c *cell) {
@@ -330,7 +369,7 @@ func (ff *FlatFile) put(key, val []byte) error {
 	}
 	// Append the cell.
 	ff.header.Use(putcell)
-	return nil
+	return
 }
 
 // Put puts val into FlatFile under key or returns an error if one occurs.
@@ -366,7 +405,6 @@ func (ff *FlatFile) get(key []byte, cache bool) (blob []byte, err error) {
 		// From cache.
 		blob = make([]byte, cell.Used)
 		copy(blob, cell.cache)
-		return
 	} else {
 		// From page.
 		page := ff.stream.Page(cell)
@@ -463,8 +501,8 @@ func (ff *FlatFile) Modify(key, val []byte) (err error) {
 	if ff.options.MaxPageSize > 0 && int64(len(val)) > ff.options.MaxPageSize {
 		return ErrBlobTooBig
 	}
-	// TODO Implement intent.
-	if err = ff.delete(key); err != nil {
+	di, err := ff.delete(key)
+	if err != nil {
 		return
 	}
 	if err := ff.put(key, val); err != nil {
@@ -475,17 +513,35 @@ func (ff *FlatFile) Modify(key, val []byte) (err error) {
 			return ErrFlatFile.Errorf("mirror error: %w", err)
 		}
 	}
+	if di >= 0 {
+		ff.intents.Complete(di)
+	}
 	return nil
 }
 
 // delete is Delete implementation.
-func (ff *FlatFile) delete(key []byte) error {
+func (ff *FlatFile) delete(key []byte) (itt IntentID, err error) {
 
 	k := string(key)
 
 	cell, ok := ff.header.Cell(key)
 	if !ok {
-		return ErrKeyNotFound
+		return -1, ErrKeyNotFound
+	}
+	if ff.options.UseIntents {
+		var blob []byte
+		if len(cell.cache) != 0 {
+			blob = cell.cache
+		} else {
+			blob, err = ff.get(key, false)
+			if err != nil {
+				return -1, ErrFlatFile.Errorf("intent make error: %w", err)
+			}
+		}
+		itt, err = ff.intents.Promise(cell, OpDelete, blob)
+		if err != nil {
+			return -1, ErrFlatFile.Errorf("intent make error: %w", err)
+		}
 	}
 	delete(ff.header.keys, k)
 	ff.header.UnCache(cell)
@@ -494,7 +550,7 @@ func (ff *FlatFile) delete(key []byte) error {
 	cell.CRC32 = 0
 	cell.CellState = StateDeleted
 
-	return ff.header.Update(cell, ff.options.PersistentHeader)
+	return itt, ff.header.Update(cell, ff.options.PersistentHeader)
 }
 
 // Delete marks a blob specified under key as deleted. If an error occurs it
@@ -511,13 +567,17 @@ func (ff *FlatFile) Delete(key []byte) error {
 	ff.mutex.Lock()
 	defer ff.mutex.Unlock()
 
-	if err := ff.delete(key); err != nil {
+	di, err := ff.delete(key)
+	if err != nil {
 		return err
 	}
 	if ff.mirror != nil {
 		if err := ff.mirror.Delete(key); err != nil {
 			return ErrFlatFile.Errorf("mirror error: %w", err)
 		}
+	}
+	if di >= 0 {
+		ff.intents.Complete(di)
 	}
 	return nil
 }

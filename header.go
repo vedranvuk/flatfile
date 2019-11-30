@@ -224,7 +224,7 @@ func (h *header) Update(c *cell, immediate bool) error {
 		if _, err := h.file.Seek(0, os.SEEK_END); err != nil {
 			return ErrFlatFile.Errorf("header seek error: %w", err)
 		}
-		if err := c.write(h.file, string(c.key)); err != nil {
+		if err := c.write(h.file, c.key); err != nil {
 			return err
 		}
 	} else {
@@ -257,7 +257,7 @@ func (h *header) Trash(c *cell) {
 
 // Restore removes the cell from the bin.
 func (h *header) Restore(c *cell) {
-	h.trash.Remove(c)
+	h.trash.Restore(c)
 }
 
 // Endirty marks a cell under specified key as dirty.

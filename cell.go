@@ -71,24 +71,25 @@ func (c *cell) UnmarshalBinary(data []byte) error {
 
 // write writes the cell to writer w under specified key.
 func (c *cell) write(w io.Writer, key string) (err error) {
+	var buffer []byte
 	writer := bufio.NewWriter(w)
-	if err := binaryex.WriteString(writer, key); err != nil {
-		return ErrFlatFile.Errorf("cell write error: %w", err)
+	err = binaryex.WriteString(writer, key)
+	if err == nil {
+		buffer, err = c.MarshalBinary()
 	}
-	buffer, err := c.MarshalBinary()
+	if err == nil {
+		binaryex.WriteNumber(writer, len(buffer))
+	}
+	if err == nil {
+		_, err = writer.Write(buffer)
+	}
+	if err == nil {
+		err = writer.Flush()
+	}
 	if err != nil {
 		return ErrFlatFile.Errorf("cell write error: %w", err)
 	}
-	if err = binaryex.WriteNumber(writer, len(buffer)); err != nil {
-		return ErrFlatFile.Errorf("cell write error: %w", err)
-	}
-	if _, err = writer.Write(buffer); err != nil {
-		return ErrFlatFile.Errorf("cell write error: %w", err)
-	}
-	if err = writer.Flush(); err != nil {
-		return ErrFlatFile.Errorf("cell write error: %w", err)
-	}
-	return nil
+	return
 }
 
 // BlobEndPos returns cell blob end position in the stream.

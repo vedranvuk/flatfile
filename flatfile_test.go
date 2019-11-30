@@ -17,6 +17,7 @@ import (
 func TestFlatFileBasicRW(t *testing.T) {
 
 	testdir := "test/basicrw"
+	os.RemoveAll(testdir)
 	defer os.RemoveAll(testdir)
 
 	data := make(map[string]string)
@@ -78,9 +79,11 @@ func TestCRUD(t *testing.T) {
 
 	// remove temp files
 	testdir := "test/crud"
+	os.RemoveAll(testdir)
 	defer os.RemoveAll(testdir)
 
 	testmirrordir := "test/crudmirror"
+	os.RemoveAll(testmirrordir)
 	defer os.RemoveAll(testmirrordir)
 
 	// init test data
@@ -215,6 +218,8 @@ func TestExtensive(t *testing.T) {
 		testdir   = "test/extensive"
 		mirrordir = "test/extensive/mirror"
 	)
+	os.RemoveAll(testdir)
+	os.RemoveAll(mirrordir)
 	defer os.RemoveAll(testdir)
 	defer os.RemoveAll(mirrordir)
 
@@ -238,12 +243,12 @@ func TestExtensive(t *testing.T) {
 	}
 
 	ff.Close()
-
 }
 
 func TestWalk(t *testing.T) {
 
 	testdir := "test/walk"
+	os.RemoveAll(testdir)
 	defer os.RemoveAll(testdir)
 
 	data := make(map[string]string)
@@ -278,6 +283,7 @@ func TestWalk(t *testing.T) {
 func TestKeys(t *testing.T) {
 
 	testdir := "test/keys"
+	os.RemoveAll(testdir)
 	defer os.RemoveAll(testdir)
 
 	data := make(map[string]string)
@@ -322,6 +328,7 @@ func benchmarkGet(b *testing.B, options *Options) {
 	const (
 		testdir = "test/benchmark/reads"
 	)
+	os.RemoveAll(testdir)
 	defer os.RemoveAll(testdir)
 
 	ff, err := Open(testdir, options)
@@ -368,6 +375,7 @@ func benchmarkPut(b *testing.B, options *Options) {
 	const (
 		testdir = "test/benchmark/writes"
 	)
+	os.RemoveAll(testdir)
 	defer os.RemoveAll(testdir)
 
 	ff, err := Open(testdir, options)
@@ -411,6 +419,7 @@ func benchmarkDelete(b *testing.B, options *Options) {
 	const (
 		testdir = "test/benchmark/reads"
 	)
+	os.RemoveAll(testdir)
 	defer os.RemoveAll(testdir)
 
 	ff, err := Open(testdir, options)
@@ -457,6 +466,7 @@ func benchmarkModify(b *testing.B, options *Options) {
 	const (
 		testdir = "test/benchmark/reads"
 	)
+	os.RemoveAll(testdir)
 	defer os.RemoveAll(testdir)
 
 	ff, err := Open(testdir, options)
@@ -510,8 +520,21 @@ func BenchmarkPut(b *testing.B) {
 	benchmarkPut(b, options)
 }
 
+func BenchmarkPutNoHeaderUpdate(b *testing.B) {
+	options := NewOptions()
+	options.PersistentHeader = false
+	benchmarkPut(b, options)
+}
+
 func BenchmarkGet(b *testing.B) {
 	options := NewOptions()
+	benchmarkGet(b, options)
+}
+
+func BenchmarkGetCahched(b *testing.B) {
+	options := NewOptions()
+	options.CachedWrites = true
+	options.MaxCacheMemory = 4294967296
 	benchmarkGet(b, options)
 }
 
@@ -520,7 +543,32 @@ func BenchmarkDelete(b *testing.B) {
 	benchmarkDelete(b, options)
 }
 
+func BenchmarkDeleteNoHeaderUpdate(b *testing.B) {
+	options := NewOptions()
+	options.PersistentHeader = false
+	benchmarkDelete(b, options)
+}
+
 func BenchmarkModify(b *testing.B) {
 	options := NewOptions()
+	benchmarkModify(b, options)
+}
+
+func BenchmarkModifyNoHeaderUpdate(b *testing.B) {
+	options := NewOptions()
+	options.PersistentHeader = false
+	benchmarkModify(b, options)
+}
+
+func BenchmarkModifyIntent(b *testing.B) {
+	options := NewOptions()
+	options.UseIntents = true
+	benchmarkModify(b, options)
+}
+
+func BenchmarkModifyNoHeaderUpdateIntent(b *testing.B) {
+	options := NewOptions()
+	options.PersistentHeader = false
+	options.UseIntents = true
 	benchmarkModify(b, options)
 }
