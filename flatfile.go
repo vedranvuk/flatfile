@@ -85,8 +85,8 @@ type FlatFile struct {
 }
 
 // Open opens an existing or creates a new FlatFile in the
-// base directory of filename. Close() MUST be called after
-// use to free resources and open file descriptors.
+// base directory of filename. Filename must not start with a dot.
+// Close() MUST be called after use to free resources and file descriptors.
 func Open(filename string, options *Options) (*FlatFile, error) {
 
 	// Extract FlatFile name from the base of the specified filename.
@@ -94,6 +94,7 @@ func Open(filename string, options *Options) (*FlatFile, error) {
 	if bn == "." || bn == "/" {
 		return nil, ErrFlatFile.Errorf("invalid filename: '%s'", filename)
 	}
+
 	// Check if FlatFile dir already exists and if not, create it.
 	dirExists, err := FileExists(filename)
 	if err != nil {
