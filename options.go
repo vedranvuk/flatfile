@@ -65,6 +65,10 @@ type Options struct {
 	// Default value: true
 	ZeroPadDeleted bool
 
+	// MergeAdjacentDeletes specifies if adjacent deleted cells should be merged.
+	// Default value: true.
+	MergeAdjacentDeletes bool
+
 	// CompactHeader specifies if the header should be compacted each time when
 	// loaded from file on session start.
 	// Default value: true
@@ -80,8 +84,8 @@ type Options struct {
 	// filename holds the options filename once options have been persisted.
 	filename string
 
-	// mirror specifies if this FlatFile is a mirror.
-	mirrored bool
+	// utility specifies if this FlatFile is an utility for main FlatFile.
+	utility bool
 }
 
 // NewOptions returns a new *Options instance.
@@ -103,6 +107,7 @@ func (o *Options) init() {
 	o.Immutable = false
 	o.SyncWrites = false
 	o.ZeroPadDeleted = true
+	o.MergeAdjacentDeletes = true
 	o.CompactHeader = true
 	o.UseIntents = false
 }
@@ -120,7 +125,7 @@ func (o *Options) Unmarshal(r io.Reader) error {
 		return err
 	}
 	no.filename = o.filename
-	no.mirrored = o.mirrored
+	no.utility = o.utility
 	*o = *no
 	return nil
 }

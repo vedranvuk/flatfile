@@ -241,7 +241,8 @@ func (h *header) Destroy(c *cell) {
 // Cache caches val of cell c under key, imposing cache size limit
 // then returns the updated cell.
 func (h *header) Cache(c *cell, val []byte, limit int64) {
-	c.cache = val
+	c.cache = make([]byte, len(val))
+	copy(c.cache, val)
 	h.cache.Push(c, limit)
 }
 
@@ -304,4 +305,10 @@ func (h *header) Keys() (result [][]byte) {
 		i++
 	}
 	return
+}
+
+// Clear clears the header file and initializes header file.
+func (h *header) Clear() error {
+	// TODO Implement Clear()
+	return nil
 }

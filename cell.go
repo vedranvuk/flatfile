@@ -41,7 +41,7 @@ type cell struct {
 	Offset int64
 
 	// Allocated is the initial size of blob as it was first
-	// created. Allocated >= Used.
+	// created. It is always > 0 and >= Used.
 	Allocated int64
 
 	// Used specified how much of Allocated is used. Used <= Allocated.
@@ -95,4 +95,9 @@ func (c *cell) write(w io.Writer, key string) (err error) {
 // BlobEndPos returns cell blob end position in the stream.
 func (c *cell) BlobEndPos() int64 {
 	return c.Offset + c.Allocated
+}
+
+// Cached returns if cell blob is in memory.
+func (c *cell) Cached() bool {
+	return len(c.cache) > 0
 }

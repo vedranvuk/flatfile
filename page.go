@@ -17,7 +17,6 @@ type page struct {
 
 // Put puts blob into page, ofset and bound by c.
 // If zeropad, a blob smaller than c.Allocated is zeroed.
-// If useintent, an intent file is maintained during the operation.
 func (p *page) Put(c *cell, blob []byte, zeropad bool) (err error) {
 	buf := bytes.NewBuffer(nil)
 	if _, err = buf.Write(blob); err != nil {
@@ -47,7 +46,7 @@ func (p *page) Get(c *cell) (buf []byte, err error) {
 	if _, err := p.file.Read(buf); err != nil {
 		return nil, ErrFlatFile.Errorf("page write error: %w", err)
 	}
-	return buf, nil
+	return
 }
 
 // Close closes the underlying page file.

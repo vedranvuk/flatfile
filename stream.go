@@ -122,6 +122,12 @@ func (s *stream) Close() error {
 	return nil
 }
 
+// Clear clears the stream and removes page files from disk.
+func (s *stream) Clear() error {
+	// TODO Implement Clear()
+	return nil
+}
+
 // Page retrieves a page by index.
 func (s *stream) Page(c *cell) *page {
 	return s.pages[int(c.PageIndex)]

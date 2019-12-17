@@ -21,6 +21,8 @@ func newBin() *bin {
 // Trash inserts c to bin.
 func (b *bin) Trash(c *cell) {
 
+	// TODO Merge adjacent empty cells.
+
 	if len(b.cells) == 0 {
 		b.cells = append(b.cells, c)
 		b.cellids[c.CellID] = c
@@ -44,7 +46,7 @@ func (b *bin) Trash(c *cell) {
 
 // Recycle returns c whose .Allocated satisfied minsize
 // or an empty cell if none such found.
-func (b *bin) Recycle(minsize int64) *cell {
+func (b *bin) Recycle(minsize int64) (c *cell) {
 
 	i := sort.Search(len(b.cells), func(i int) bool {
 		return b.cells[i].Allocated >= minsize
@@ -52,7 +54,7 @@ func (b *bin) Recycle(minsize int64) *cell {
 	if i >= len(b.cells) || b.cells[i].Allocated < minsize {
 		return &cell{}
 	}
-	c := b.cells[i]
+	c = b.cells[i]
 	b.cells[i] = nil
 	delete(b.cellids, c.CellID)
 	if i == len(b.cells)-1 {
@@ -60,7 +62,7 @@ func (b *bin) Recycle(minsize int64) *cell {
 	} else {
 		b.cells = append(b.cells[:i], b.cells[i+1:]...)
 	}
-	return c
+	return
 }
 
 // Restore restores a cell from the bin.
