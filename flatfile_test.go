@@ -5,11 +5,10 @@
 package flatfile
 
 import (
-	"fmt"
 	"os"
 	"testing"
 
-	"github.com/vedranvuk/strings"
+	"github.com/vedranvuk/randomex"
 )
 
 // TestFlatFileBasicRW writes predefined data, gets and checks it
@@ -22,8 +21,8 @@ func TestFlatFileBasicRW(t *testing.T) {
 
 	data := make(map[string]string)
 	for i := 0; i < 10; i++ {
-		key := strings.RandomString(true, true, true, 8)
-		val := strings.RandomString(true, true, true, 8)
+		key := randomex.Rand(8)
+		val := randomex.Rand(8)
 		data[key] = val
 	}
 
@@ -200,51 +199,6 @@ func TestCRUD(t *testing.T) {
 	}
 }
 
-func TestExtensive(t *testing.T) {
-
-	const (
-		TestDataSize = 256
-		CellDataSize = 8
-	)
-
-	testdata := make(map[string]string)
-	for i := 0; i < TestDataSize; i++ {
-		key := fmt.Sprintf("data%.4d", i)
-		dat := make([]byte, CellDataSize)
-		testdata[key] = string(dat)
-	}
-
-	const (
-		testdir   = "test/extensive"
-		mirrordir = "test/extensive/mirror"
-	)
-	os.RemoveAll(testdir)
-	os.RemoveAll(mirrordir)
-	defer os.RemoveAll(testdir)
-	defer os.RemoveAll(mirrordir)
-
-	options := NewOptions()
-	options.MirrorDir = mirrordir
-	options.CRC = true
-	options.MaxCacheMemory = 1024
-	options.CachedWrites = true
-	options.MaxPageSize = 4096
-	options.PreallocatePages = true
-	options.PersistentHeader = true
-	options.Immutable = false
-	options.SyncWrites = false
-	options.ZeroPadDeleted = true
-	options.CompactHeader = true
-	options.UseIntents = true
-
-	ff, err := Open(testdir, options)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ff.Close()
-}
-
 func TestWalk(t *testing.T) {
 
 	testdir := "test/walk"
@@ -253,8 +207,8 @@ func TestWalk(t *testing.T) {
 
 	data := make(map[string]string)
 	for i := 0; i < 10; i++ {
-		key := strings.RandomString(true, true, true, 8)
-		val := strings.RandomString(true, true, true, 8)
+		key := randomex.Rand(8)
+		val := randomex.Rand(8)
 		data[key] = val
 	}
 
@@ -288,8 +242,8 @@ func TestKeys(t *testing.T) {
 
 	data := make(map[string]string)
 	for i := 0; i < 1024; i++ {
-		key := strings.RandomString(true, true, true, 8)
-		val := strings.RandomString(true, true, true, 8)
+		key := randomex.Rand(8)
+		val := randomex.Rand(8)
 		data[key] = val
 	}
 
@@ -341,12 +295,12 @@ func benchmarkGet(b *testing.B, options *Options) {
 	for i := 0; i < b.N; i++ {
 		key := ""
 		for {
-			key = strings.RandomString(true, true, true, 8)
+			key = randomex.Rand(8)
 			if _, ok := datam[key]; !ok {
 				break
 			}
 		}
-		val := strings.RandomString(true, true, true, 16)
+		val := randomex.Rand(8)
 		datam[key] = val
 		datai = append(datai, key)
 		if err = ff.Put([]byte(key), []byte(val)); err != nil {
@@ -387,12 +341,12 @@ func benchmarkPut(b *testing.B, options *Options) {
 	for i := 0; i < b.N; i++ {
 		key := ""
 		for {
-			key = strings.RandomString(true, true, true, 8)
+			key = randomex.Rand(8)
 			if _, ok := datam[key]; !ok {
 				break
 			}
 		}
-		val := strings.RandomString(true, true, true, 24)
+		val := randomex.Rand(8)
 		datai = append(datai, key)
 		datam[key] = val
 	}
@@ -432,12 +386,12 @@ func benchmarkDelete(b *testing.B, options *Options) {
 	for i := 0; i < b.N; i++ {
 		key := ""
 		for {
-			key = strings.RandomString(true, true, true, 8)
+			key = randomex.Rand(8)
 			if _, ok := datam[key]; !ok {
 				break
 			}
 		}
-		val := strings.RandomString(true, true, true, 16)
+		val := randomex.Rand(8)
 		datam[key] = val
 		datai = append(datai, key)
 		if err = ff.Put([]byte(key), []byte(val)); err != nil {
@@ -480,12 +434,12 @@ func benchmarkModify(b *testing.B, options *Options) {
 	for i := 0; i < b.N; i++ {
 		key := ""
 		for {
-			key = strings.RandomString(true, true, true, 8)
+			key = randomex.Rand(8)
 			if _, ok := datam[key]; !ok {
 				break
 			}
 		}
-		val := strings.RandomString(true, true, true, 16)
+		val := randomex.Rand(8)
 		mval := ""
 		for {
 			if mval != val {

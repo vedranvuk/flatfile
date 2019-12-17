@@ -1,8 +1,9 @@
 package flatfile
 
-import "testing"
-
-import "reflect"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestCell(t *testing.T) {
 

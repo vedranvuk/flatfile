@@ -5,9 +5,9 @@
 package main
 
 import (
-	"math/rand"
+	"github.com/vedranvuk/randomex"
 
-	"github.com/vedranvuk/strings"
+	"math/rand"
 )
 
 // TestPair
@@ -32,8 +32,8 @@ func NewTestData(entrycount int) *TestData {
 	}
 	for i := 0; i < len(p.pairs); i++ {
 		p.pairs[i] = &TestPair{
-			key: strings.RandomString(true, true, true, 8+rand.Intn(8)),
-			val: strings.RandomString(true, true, true, 8+rand.Intn(1024)),
+			key: randomex.Rand(8 + rand.Intn(8)),
+			val: randomex.Rand(8 + rand.Intn(1024)),
 		}
 		p.keys[p.pairs[i].key] = true
 		p.vals[p.pairs[i].val] = true
@@ -44,7 +44,7 @@ func NewTestData(entrycount int) *TestData {
 // generates a random key
 func (td *TestData) GenKey() string {
 	for {
-		key := strings.RandomString(true, true, true, 8+rand.Intn(8))
+		key := randomex.Rand(8 + rand.Intn(8))
 		if _, ok := td.keys[key]; ok {
 			continue
 		}
@@ -55,7 +55,7 @@ func (td *TestData) GenKey() string {
 // generates a random value
 func (td *TestData) GenVal() string {
 	for {
-		val := strings.RandomString(true, true, true, 8+rand.Intn(512))
+		val := randomex.Rand(8 + rand.Intn(1024))
 		if _, ok := td.vals[val]; ok {
 			continue
 		}
