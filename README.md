@@ -6,6 +6,8 @@ The motivation was to build a simple, small, fast and above all straightforward 
 
 ## Status
 
+**Archived code. No changes planned.**
+
 Few features and an exhaustive test left to implement.
 
 ## Features
